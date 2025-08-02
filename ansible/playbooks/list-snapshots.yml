@@ -1,0 +1,20 @@
+- name: List Restic Snapshots for a specific host
+  hosts: "{{ target_host }}"
+  become: yes
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  tasks:
+    - name: "List snapshots for {{ inventory_hostname }}"
+      ansible.builtin.command:
+        cmd: "restic snapshots"
+      environment:
+        RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+      register: snapshot_list
+      changed_when: false
+
+    - name: "Display available snapshots"
+      ansible.builtin.debug:
+        msg: "{{ snapshot_list.stdout_lines }}"

@@ -1,0 +1,42 @@
+- name: Prepare a new backup client
+  hosts: "{{ target_host }}"
+  become: yes
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  roles:
+    - restic-client
+
+  tasks:
+    - name: Ensure SSH key exists for root user on client
+      community.crypto.openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        state: present
+        type: ed25519
+
+    - name: Fetch the client's public SSH key to the controller
+      ansible.builtin.fetch:
+        src: /root/.ssh/id_ed25519.pub
+        dest: "fetched_keys/{{ inventory_hostname }}.pub"
+        flat: yes
+
+    - name: Add the backup server's key to the client's known_hosts
+      ansible.builtin.known_hosts:
+        name: "{{ ansible_controller_ip }}"
+        key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 ' + ansible_controller_ip) }}"
+        path: /root/.ssh/known_hosts
+        state: present
+
+- name: Authorize the new client key on localhost
+  hosts: localhost
+  connection: local
+  become: yes
+  vars_files:
+    - ../group_vars/secrets.yml
+  tasks:
+    - name: Authorize client key for restic-backup user
+      ansible.posix.authorized_key:
+        user: restic-backup
+        key: "{{ lookup('file', 'fetched_keys/' + target_host + '.pub') }}"
+        state: present

@@ -1,0 +1,23 @@
+- name: Restore a specific Restic Snapshot to a remote host
+  hosts: "{{ target_host }}"
+  become: yes
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  tasks:
+    - name: "Restoring snapshot '{{ snapshot_id }}' to {{ restore_path }}"
+      ansible.builtin.command:
+        cmd: "restic restore {{ snapshot_id }} --target {{ restore_path }}"
+
+      environment:
+        RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+      register: restore_result
+
+    - name: Display restore result summary
+      ansible.builtin.debug:
+        msg:
+          - "Restore process completed."
+          - "Files are located in '{{ restore_path }}' on host '{{ target_host }}'."
+          - "Summary: {{ restore_result.stdout_lines | last }}"
