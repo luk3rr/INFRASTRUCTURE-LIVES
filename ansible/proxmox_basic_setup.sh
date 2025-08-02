@@ -2,5 +2,5 @@
 
 set -e
 
-ansible-playbook proxmox_basic_setup/setup_proxmox_host.yml
-ansible-playbook proxmox_basic_setup/create_vm_template.yml
+ansible-playbook playbooks/setup_proxmox_host.yml
+ansible-playbook playbooks/create_vm_template.yml

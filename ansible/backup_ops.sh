@@ -48,10 +48,43 @@ get_backup_hosts() {
 
 msg_title "Ansible Backup & Restore Orchestrator"
 PS3="Choose an operation (enter the number): "
-options=("Backup All Services" "List Snapshots for a Service" "Restore a Service" "Exit")
+options=("Setup Backup Client(s)" "Backup All Services" "List Snapshots for a Service" "Restore a Service" "Exit")
 
 select opt in "${options[@]}"; do
   case $opt in
+    "Setup Backup Client(s)")
+      msg_alert "Do you want to set up ALL clients or a SINGLE client?"
+      select setup_option in "All" "Single"; do
+        case $setup_option in
+          All)
+            prepare_ssh_server
+            msg_info "Setting up all clients from inventory..."
+            ansible-playbook playbooks/setup-backup.yml --ask-vault-pass
+            msg_succ "Setup for all clients completed."
+            break
+            ;;
+          Single)
+            msg_alert "Select the client to set up:"
+            hosts=($(get_backup_hosts))
+            select target_host in "${hosts[@]}"; do
+              if [[ -n "$target_host" ]]; then
+                prepare_ssh_server
+                msg_info "Setting up client '${target_host}'..."
+                ansible-playbook playbooks/setup-backup.yml --limit "${target_host}" --ask-vault-pass
+                msg_succ "Setup for '${target_host}' completed."
+                break
+              else
+                msg_error "Invalid selection."
+              fi
+            done
+            break
+            ;;
+          *) msg_error "Invalid option.";;
+        esac
+      done
+      break
+      ;;
+
     "Backup All Services")
       prepare_ssh_server
       msg_alert "Starting full backup of all services..."

@@ -1,2 +1,0 @@
-- import_playbook: playbooks/adguard.yml
-- import_playbook: playbooks/npm.yml

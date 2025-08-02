@@ -1,13 +1,10 @@
-- name: Prepare a new backup client
-  hosts: "{{ target_host }}"
+- name: Prepare backup clients (install restic, configure SSH)
+  hosts: lxc_containers, vms
   become: yes
-
   vars_files:
     - ../group_vars/secrets.yml
-
   roles:
     - restic-client
-
   tasks:
     - name: Ensure SSH key exists for root user on client
       community.crypto.openssh_keypair:
@@ -28,15 +25,27 @@
         path: /root/.ssh/known_hosts
         state: present
 
-- name: Authorize the new client key on localhost
+- name: Prepare backup server (authorize keys, init repos)
   hosts: localhost
   connection: local
   become: yes
   vars_files:
     - ../group_vars/secrets.yml
   tasks:
-    - name: Authorize client key for restic-backup user
+    - name: Authorize client keys for restic-backup user
       ansible.posix.authorized_key:
         user: restic-backup
-        key: "{{ lookup('file', 'fetched_keys/' + target_host + '.pub') }}"
+        key: "{{ lookup('file', 'fetched_keys/' + item + '.pub') }}"
         state: present
+      loop: "{{ query('inventory_hostnames', 'lxc_containers,vms') }}"
+
+    - name: Initialize Restic repository for each client (if it doesn't exist)
+      loop: "{{ query('inventory_hostnames', 'lxc_containers,vms') }}"
+      become_user: restic-backup
+      ansible.builtin.command:
+        cmd: "restic init"
+      environment:
+        RESTIC_REPOSITORY: "/home/restic-backup/repo/{{ item }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+      args:
+        creates: "/home/restic-backup/repo/{{ item }}/config"
