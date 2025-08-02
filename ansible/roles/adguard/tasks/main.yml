@@ -1,0 +1,31 @@
+---
+- name: AdGuard | Check latest version
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
+    return_content: yes
+  register: adguard_latest_release
+  check_mode: no
+
+- name: AdGuard | Set latest version fact
+  ansible.builtin.set_fact:
+    adguard_version: "{{ adguard_latest_release.json.tag_name }}"
+    adguard_download_url: "https://github.com/AdguardTeam/AdGuardHome/releases/download/{{ adguard_latest_release.json.tag_name }}/AdGuardHome_linux_amd64.tar.gz"
+
+- name: AdGuard | Download and unarchive
+  ansible.builtin.unarchive:
+    src: "{{ adguard_download_url }}"
+    dest: /opt/
+    remote_src: yes
+    creates: /opt/AdGuardHome/AdGuardHome
+
+- name: AdGuard | Configure AdGuardHome.yaml
+  ansible.builtin.template:
+    src: AdGuardHome.yaml.j2
+    dest: /opt/AdGuardHome/AdGuardHome.yaml
+    mode: '0644'
+  notify: Restart AdGuard
+
+- name: AdGuard | Install as a service and start
+  ansible.builtin.command:
+    cmd: /opt/AdGuardHome/AdGuardHome -s install
+    creates: /etc/systemd/system/AdGuardHome.service

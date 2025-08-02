@@ -1,0 +1,373 @@
+- name: NPM | Define package versions
+  ansible.builtin.set_fact:
+    node_version: "16.20.2"
+
+- name: NPM | Install base dependencies
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - apache2-utils
+      - logrotate
+      - build-essential
+      - git
+    state: present
+    update_cache: yes
+
+- name: NPM | Install Python dependencies
+  block:
+    - name: NPM | Install system packages for Python
+      ansible.builtin.apt:
+        name:
+          - python3
+          - python3-dev
+          - python3-pip
+          - python3-venv
+          - python3-cffi
+          - python3-certbot
+          - python3-certbot-dns-cloudflare
+        state: present
+
+    - name: NPM | Install Python certbot plugins with pip (breaking system packages as per script)
+      ansible.builtin.pip:
+        name: certbot-dns-multi
+        extra_args: --break-system-packages
+
+    - name: NPM | Create certbot virtual environment
+      ansible.builtin.command:
+        cmd: python3 -m venv /opt/certbot/
+        creates: /opt/certbot/bin/activate
+
+- name: NPM | Install OpenResty
+  block:
+    - name: NPM | Add OpenResty GPG key
+      ansible.builtin.get_url:
+        url: https://openresty.org/package/pubkey.gpg
+        dest: /etc/apt/trusted.gpg.d/openresty.asc
+        mode: '0644'
+
+    - name: NPM | Add OpenResty repository
+      ansible.builtin.apt_repository:
+        repo: "deb http://openresty.org/package/debian bullseye openresty"
+        state: present
+        filename: openresty
+
+    - name: NPM | Install OpenResty package
+      ansible.builtin.apt:
+        name: openresty
+        state: present
+        update_cache: yes
+
+- name: NPM | Install Node.js with NVM (Node Version Manager)
+  block:
+    - name: NPM | Download and execute NVM install script
+      ansible.builtin.shell:
+        cmd: curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+        creates: "{{ ansible_env.HOME }}/.nvm/nvm.sh"
+
+    - name: NPM | Install specific Node.js version with NVM
+      ansible.builtin.shell:
+        cmd: ". {{ ansible_env.HOME }}/.nvm/nvm.sh && nvm install {{ node_version }}"
+        creates: "{{ ansible_env.HOME }}/.nvm/versions/node/v{{ node_version }}/bin/node"
+
+    - name: NPM | Link Node.js binary to system path
+      ansible.builtin.file:
+        src: "{{ ansible_env.HOME }}/.nvm/versions/node/v{{ node_version }}/bin/node"
+        dest: /usr/bin/node
+        state: link
+
+- name: NPM | Install pnpm globally using npm
+  community.general.npm:
+    name: pnpm
+    version: '8.15'
+    global: yes
+
+- name: NPM | Get latest release version from GitHub
+  ansible.builtin.uri:
+    url: "https://api.github.com/repos/NginxProxyManager/nginx-proxy-manager/releases/latest"
+    return_content: yes
+  register: npm_latest_release
+  check_mode: no
+
+- name: NPM | Set version and source directory facts
+  ansible.builtin.set_fact:
+    npm_version: "{{ npm_latest_release.json.tag_name | replace('v', '') }}"
+    npm_source_dir: "/opt/nginx-proxy-manager-{{ npm_latest_release.json.tag_name | replace('v', '') }}"
+
+- name: NPM | Download and unarchive Nginx Proxy Manager
+  ansible.builtin.unarchive:
+    src: "https://github.com/NginxProxyManager/nginx-proxy-manager/archive/refs/tags/v{{ npm_version }}.tar.gz"
+    dest: /opt/
+    remote_src: yes
+    creates: "{{ npm_source_dir }}"
+
+- name: NPM | Setup environment, build, and configure
+  block:
+    - name: NPM | Set up environment symlinks
+      ansible.builtin.file:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        state: link
+        force: true
+      loop:
+        - { src: '/usr/bin/python3', dest: '/usr/bin/python' }
+        - { src: '/usr/bin/certbot', dest: '/opt/certbot/bin/certbot' }
+        - { src: '/usr/local/openresty/nginx/sbin/nginx', dest: '/usr/sbin/nginx' }
+        - { src: '/usr/local/openresty/nginx/', dest: '/etc/nginx' }
+
+    - name: NPM | Create required directories
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - /var/www/html
+        - /etc/nginx/logs
+        - /etc/nginx/conf.d/include
+        - /data/nginx
+        - /data/custom_ssl
+        - /data/logs
+        - /app
+        - /app/global
+        - /app/frontend
+        - /app/frontend/images
+        - /tmp/nginx/body
+        - /run/nginx
+        - /data/access
+        - /data/nginx/default_host
+        - /data/nginx/default_www
+        - /data/nginx/proxy_host
+        - /data/nginx/redirection_host
+        - /data/nginx/stream
+        - /data/nginx/dead_host
+        - /data/nginx/temp
+        - /var/lib/nginx/cache/public
+        - /var/lib/nginx/cache/private
+        - /var/cache/nginx/proxy_temp
+
+    - name: NPM | Set version in backend package.json
+      ansible.builtin.replace:
+        path: "{{ npm_source_dir }}/backend/package.json"
+        regexp: '"version":\s*"0\.0\.0"'
+        replace: '"version": "{{ npm_version }}"'
+
+    - name: NPM | Set version in frontend package.json
+      ansible.builtin.replace:
+        path: "{{ npm_source_dir }}/frontend/package.json"
+        regexp: '"version":\s*"0\.0\.0"'
+        replace: '"version": "{{ npm_version }}"'
+
+    - name: NPM | Comment out daemon directive in nginx.conf
+      ansible.builtin.replace:
+        path: "{{ npm_source_dir}}/docker/rootfs/etc/nginx/nginx.conf"
+        regexp: '^daemon'
+        replace: '#daemon'
+
+    - name: NPM | Find include paths in NGINX .conf files
+      ansible.builtin.find:
+        paths: "{{ npm_source_dir }}"
+        patterns: "*.conf"
+        recurse: yes
+      register: nginx_conf_files
+
+    - name: NPM | Fix include paths inside .conf files
+      ansible.builtin.replace:
+        path: "{{ item.path }}"
+        regexp: 'include conf\.d'
+        replace: 'include /etc/nginx/conf.d'
+      loop: "{{ nginx_conf_files.files }}"
+
+    - name: NPM | Set permissions for /var/cache/nginx
+      ansible.builtin.file:
+        path: /var/cache/nginx
+        recurse: yes
+        mode: '0777'
+
+    - name: NPM | Set ownership of /tmp/nginx
+      ansible.builtin.file:
+        path: /tmp/nginx
+        owner: root
+        group: root
+
+    - name: NPM | Copy letsencrypt.ini
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/docker/rootfs/etc/letsencrypt.ini"
+        dest: /etc/letsencrypt.ini
+        remote_src: yes
+        mode: '0644'
+
+    - name: NPM | Copy logrotate config
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/docker/rootfs/etc/logrotate.d/nginx-proxy-manager"
+        dest: /etc/logrotate.d/nginx-proxy-manager
+        remote_src: yes
+        mode: '0644'
+
+    - name: NPM | Copy nginx config contents
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/docker/rootfs/etc/nginx/"
+        dest: "/etc/nginx/"
+        remote_src: yes
+        mode: '0644'
+
+    - name: NPM | Copy static HTML files
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/docker/rootfs/var/www/html/"
+        dest: "/var/www/html/"
+        remote_src: yes
+        mode: '0644'
+
+    - name: NPM | Symlink nginx.conf to /etc/nginx/conf/nginx.conf
+      ansible.builtin.file:
+        src: /etc/nginx/nginx.conf
+        dest: /etc/nginx/conf/nginx.conf
+        state: link
+        force: true
+
+    - name: NPM | Remove dev.conf if exists
+      ansible.builtin.file:
+        path: /etc/nginx/conf.d/dev.conf
+        state: absent
+
+    - name: NPM | Generate resolvers.conf with current nameservers
+      ansible.builtin.shell: |
+        echo resolver $(awk 'BEGIN{ORS=" "} $1=="nameserver" {print ($2 ~ ":")? "["$2"]": $2}' /etc/resolv.conf) \; > /etc/nginx/conf.d/include/resolvers.conf
+      args:
+        executable: /bin/bash
+
+    - name: NPM | Generate dummy SSL cert if missing
+      ansible.builtin.command: >
+        openssl req -new -newkey rsa:2048 -days 3650 -nodes -x509
+        -subj "/O=Nginx Proxy Manager/OU=Dummy Certificate/CN=localhost"
+        -keyout /data/nginx/dummykey.pem -out /data/nginx/dummycert.pem
+      args:
+        creates: /data/nginx/dummycert.pem
+      register: openssl_output
+      changed_when: openssl_output.rc == 0
+
+    - name: NPM | Copy backend and global directories
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+      loop:
+        - { src: 'backend/', dest: '/app/' }
+        - { src: 'global/', dest: '/app/global/' }
+
+    - name: NPM | Build Frontend
+      ansible.builtin.shell:
+        cmd: "pnpm install && pnpm upgrade && pnpm run build"
+        chdir: "{{ npm_source_dir }}/frontend/"
+        creates: "{{ npm_source_dir }}/frontend/dist/index.html"
+      environment:
+        NVM_DIR: "{{ ansible_env.HOME }}/.nvm"
+        PATH: "{{ ansible_env.HOME }}/.nvm/versions/node/v{{ node_version }}/bin:{{ ansible_env.PATH }}"
+
+    - name: NPM | Copy all application files
+      ansible.builtin.copy:
+        src: "{{ npm_source_dir }}/{{ item.src }}"
+        dest: "{{ item.dest }}"
+        remote_src: yes
+      loop:
+        - { src: 'frontend/dist/', dest: '/app/frontend/' }
+        - { src: 'frontend/app-images/', dest: '/app/frontend/images' }
+
+    - name: NPM | Create default production config if it does not exist
+      ansible.builtin.copy:
+        dest: /app/config/production.json
+        content: |
+          {
+            "database": {
+              "engine": "knex-native",
+              "knex": {
+                "client": "sqlite3",
+                "connection": {
+                  "filename": "/data/database.sqlite"
+                }
+              }
+            }
+          }
+        force: no
+
+    - name: NPM | Install Backend dependencies
+      community.general.npm:
+        path: /app
+
+- name: NPM | Create systemd service file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/npm.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Nginx Proxy Manager
+      After=network.target
+      Wants=openresty.service
+
+      [Service]
+      Type=simple
+      Environment=NODE_ENV=production
+      ExecStartPre=-/usr/bin/mkdir -p /tmp/nginx/body /data/letsencrypt-acme-challenge
+      ExecStart=/usr/bin/node index.js --abort_on_uncaught_exception --max_old_space_size=250
+      WorkingDirectory=/app
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+
+- name: NPM | Fine-tune configs
+  block:
+    - name: NPM | Copy nginx.conf.default to nginx.conf if not exists
+      ansible.builtin.copy:
+        src: /usr/local/openresty/nginx/conf/nginx.conf.default
+        dest: /usr/local/openresty/nginx/conf/nginx.conf
+        remote_src: true
+        force: false
+        mode: '0644'
+
+    - name: NPM | Replace nginx user from npm to root
+      ansible.builtin.replace:
+        path: /usr/local/openresty/nginx/conf/nginx.conf
+        regexp: '^user\s+npm;'
+        replace: 'user root;'
+
+    - name: NPM | Comment out pid line in nginx.conf
+      ansible.builtin.replace:
+        path: /usr/local/openresty/nginx/conf/nginx.conf
+        regexp: '^pid'
+        replace: '#pid'
+
+    - name: NPM | Comment out su npm line in logrotate
+      ansible.builtin.replace:
+        path: /etc/logrotate.d/nginx-proxy-manager
+        regexp: '^(\s*)su npm npm'
+        replace: '\1#su npm npm'
+
+    - name: NPM | Allow system site-packages in certbot venv
+      ansible.builtin.replace:
+        path: /opt/certbot/pyvenv.cfg
+        regexp: '^include-system-site-packages\s*=\s*false'
+        replace: 'include-system-site-packages = true'
+
+- name: NPM | Enable and restart services
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: yes
+    state: restarted
+    daemon_reload: yes
+  loop:
+    - openresty
+    - npm
+
+- name: NPM | Clean up leftover files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - ../nginx-proxy-manager-*
+
+- name: NPM | Autoremove and autoclean
+  ansible.builtin.apt:
+    autoremove: yes
+    autoclean: yes
+    update_cache: no

@@ -1,0 +1,5 @@
+- name: Configure NPM Server
+  hosts: npm
+  become: yes
+  roles:
+    - npm

@@ -1,0 +1,7 @@
+- name: Configure AdGuard Server
+  hosts: adguard
+  become: yes
+  roles:
+    - adguard
+  vars_files:
+    - ../group_vars/secrets.yml

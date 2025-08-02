@@ -1,8 +1,15 @@
 .idea
 
+# Ansible
+**/group_vars/
+**/secrets.yml
+
+# Terraform
 **/.terraform
 **/.terraform.lock*
 **/terraform.tfvars
 **/*.tfstate
 **/*.tfstate.backup
+
+# ETC
 **/.env

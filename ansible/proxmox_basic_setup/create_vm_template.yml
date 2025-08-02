@@ -1,0 +1,78 @@
+---
+- name: Create Proxmox Ubuntu Cloud-Init Template
+  hosts: proxmox_hosts
+  become: yes
+  gather_facts: no
+
+  vars:
+    vm_id: 9001
+    vm_name: "ubuntu-2404-cloud-template"
+    image_url: "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+    image_path: "/tmp/noble-server-cloudimg-amd64.img"
+    storage_pool: "local-lvm"
+    vm_cores: 2
+    vm_sockets: 1
+    vm_memory: 2048
+    vm_disk_size: "32G"
+
+  tasks:
+    - name: Check for existing template
+      ansible.builtin.command: "qm status {{ vm_id }}"
+      register: template_status
+      changed_when: false
+      failed_when: false
+
+    - name: Destroy existing template if it exists
+      ansible.builtin.command: "qm destroy {{ vm_id }} --purge"
+      when: template_status.rc == 0
+
+    - name: Download Ubuntu Cloud Image (if not present)
+      ansible.builtin.get_url:
+        url: "{{ image_url }}"
+        dest: "{{ image_path }}"
+        mode: '0644'
+
+    - name: Install dependencies for image customization
+      ansible.builtin.apt:
+        name: libguestfs-tools
+        state: present
+        update_cache: yes
+
+    - name: Customize image (inject qemu-guest-agent)
+      ansible.builtin.command:
+        cmd: "virt-customize --add {{ image_path }} --install qemu-guest-agent"
+
+    - name: Create and configure the VM template using qm commands
+      ansible.builtin.shell: |
+        set -e
+
+        echo "Creating VM {{ vm_id }}..."
+        qm create {{ vm_id }} \
+          --name "{{ vm_name }}" \
+          --numa 0 \
+          --ostype l26 \
+          --cpu cputype=host \
+          --cores {{ vm_cores }} \
+          --sockets {{ vm_sockets }} \
+          --memory {{ vm_memory }} \
+          --net0 virtio,bridge=vmbr0
+
+        echo "Importing and attaching disk..."
+        qm importdisk {{ vm_id }} {{ image_path }} {{ storage_pool }}
+        qm set {{ vm_id }} --scsihw virtio-scsi-pci --scsi0 {{ storage_pool }}:vm-{{ vm_id }}-disk-0
+        qm set {{ vm_id }} --ide2 {{ storage_pool }}:cloudinit
+        qm set {{ vm_id }} --boot c --bootdisk scsi0
+        qm disk resize {{ vm_id }} scsi0 {{ vm_disk_size }}
+
+        echo "Configuring boot options and agent..."
+        qm set {{ vm_id }} --serial0 socket --vga serial0
+        qm set {{ vm_id }} --agent enabled=1
+
+        echo "Converting to template..."
+        qm template {{ vm_id }}
+      changed_when: true
+
+    - name: Clean up temporary cloud image
+      ansible.builtin.file:
+        path: "{{ image_path }}"
+        state: absent

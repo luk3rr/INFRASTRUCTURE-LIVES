@@ -1,0 +1,12 @@
+- name: Update apt cache
+  become: yes
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install restic forcing IPv4
+  become: yes
+  ansible.builtin.apt:
+    name: restic
+    state: present
+  environment:
+    APT_OPTIONS: "-o Acquire::ForceIPv4=true"

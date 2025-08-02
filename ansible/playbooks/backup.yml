@@ -1,0 +1,27 @@
+- name: Ensure backup clients are prepared
+  hosts: lxc_containers, vms
+  become: yes
+  roles:
+    - restic-client
+
+- name: Execute backups on all targets
+  hosts: lxc_containers, vms
+  become: yes
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  vars:
+    ansible_controller_ip: 192.168.1.254
+
+  tasks:
+    - name: "Backup data for {{ inventory_hostname }}"
+      ansible.builtin.command:
+        cmd: "restic backup {{ backup_path }} --tag {{ inventory_hostname }}"
+
+      environment:
+        RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+
+      register: backup_result
+      changed_when: "'files new' in backup_result.stdout"
