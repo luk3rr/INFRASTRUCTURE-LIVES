@@ -11,4 +11,6 @@ module "npm" {
   nameserver     = var.default_gateway
   password       = var.default_lxc_password
   ssh_public_key = var.ssh_public_key
+
+  disk_size = 4
 }

@@ -2,8 +2,8 @@ module "postgres" {
   source = "../modules/proxmox-lxc"
 
   hostname   = "postgres"
-  ip_address = "192.168.1.109"
-  vm_id      = 109
+  ip_address = "192.168.1.108"
+  vm_id      = 108
 
   pve_node_name  = var.pve_node_name
   template_name  = var.debian_12_template

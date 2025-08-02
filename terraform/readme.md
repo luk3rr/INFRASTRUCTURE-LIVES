@@ -4,7 +4,7 @@ Este projeto provisiona uma infraestrutura completa no Proxmox VE utilizando Ter
 
 ---
 
-### ## 1. Pré-requisitos e Instalação
+### 1. Pré-requisitos e Instalação
 
 O primeiro passo é preparar seu ambiente local. O script `local_setup.sh` foi criado para instalar o Terraform e outras dependências necessárias.
 
@@ -15,7 +15,7 @@ bash local_setup.sh
 
 ---
 
-### ## 2. Configuração do Ambiente
+### 2. Configuração do Ambiente
 
 A autenticação com a API do Proxmox e outras variáveis sensíveis são gerenciadas através de variáveis de ambiente.
 
@@ -49,7 +49,7 @@ A autenticação com a API do Proxmox e outras variáveis sensíveis são gerenc
 
 ---
 
-### ## 3. Executando o Terraform
+### 3. Executando o Terraform
 
 Com o ambiente configurado, você pode provisionar a infraestrutura.
 

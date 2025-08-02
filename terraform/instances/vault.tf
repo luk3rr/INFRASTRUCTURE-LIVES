@@ -12,6 +12,6 @@ module "vault" {
   password       = var.default_lxc_password
   ssh_public_key = var.ssh_public_key
 
-  memory = 8192
-  swap   = 1024
+  disk_size = 8
+  swap      = 1024
 }
