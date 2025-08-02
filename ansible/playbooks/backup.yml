@@ -1,27 +1,69 @@
-- name: Ensure backup clients are prepared
+- name: Prepare backup clients
   hosts: lxc_containers, vms
   become: yes
+  vars_files:
+    - ../group_vars/secrets.yml
   roles:
     - restic-client
+  tasks:
+    - name: Ensure SSH key exists for root user on client
+      community.crypto.openssh_keypair:
+        path: /root/.ssh/id_ed25519
+        state: present
+        type: ed25519
+
+    - name: Fetch the client's public SSH key to the controller
+      ansible.builtin.fetch:
+        src: /root/.ssh/id_ed25519.pub
+        dest: "fetched_keys/{{ inventory_hostname }}.pub"
+        flat: yes
+
+    - name: Add the backup server's key to the client's known_hosts
+      ansible.builtin.known_hosts:
+        name: "{{ ansible_controller_ip }}"
+        key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 ' + ansible_controller_ip) }}"
+        path: /root/.ssh/known_hosts
+        state: present
+
+- name: Prepare backup server (localhost)
+  hosts: localhost
+  connection: local
+  become: yes
+  vars_files:
+    - ../group_vars/secrets.yml
+  tasks:
+    - name: Authorize client keys for restic-backup user
+      ansible.posix.authorized_key:
+        user: restic-backup
+        key: "{{ lookup('file', 'fetched_keys/' + item + '.pub') }}"
+        state: present
+      loop: "{{ groups['lxc_containers'] + groups['vms'] }}"
+
+    - name: Initialize Restic repository for each client (if it doesn't exist)
+      loop: "{{ groups['lxc_containers'] + groups['vms'] }}"
+      become_user: restic-backup
+      ansible.builtin.command:
+        cmd: "restic init"
+      environment:
+        RESTIC_REPOSITORY: "/home/restic-backup/repo/{{ item }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+      args:
+        creates: "/home/restic-backup/repo/{{ item }}/config"
 
 - name: Execute backups on all targets
   hosts: lxc_containers, vms
   become: yes
-
+  vars:
+    ansible_ssh_pipelining: false
   vars_files:
     - ../group_vars/secrets.yml
-
-  vars:
-    ansible_controller_ip: 192.168.1.254
-
   tasks:
     - name: "Backup data for {{ inventory_hostname }}"
-      ansible.builtin.command:
+      ansible.builtin.shell:
         cmd: "restic backup {{ backup_path }} --tag {{ inventory_hostname }}"
-
       environment:
         RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
         RESTIC_PASSWORD: "{{ restic_password }}"
-
+        RESTIC_SFTP_COMMAND: "ssh -q -T -n -o BatchMode=yes"
       register: backup_result
       changed_when: "'files new' in backup_result.stdout"

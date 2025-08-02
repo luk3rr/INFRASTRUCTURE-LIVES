@@ -8,6 +8,7 @@ source "$BASH_BEAUTIFUL"
 
 SSH_KEY_PATH="$HOME/.ssh/id_ed25519"
 REMOTE_HOST="192.168.1.99"
+ANSIBLE_CONTROLLER_IP="192.168.1.254"
 REMOTE_USER="root"
 GROUP_VARS_DIR="group_vars"
 SECRETS_FILE="${GROUP_VARS_DIR}/secrets.yml"
@@ -68,6 +69,24 @@ sudo cp "${SSH_KEY_PATH}.pub" "/home/${BACKUP_USER}/.ssh/authorized_keys"
 sudo chown -R "${BACKUP_USER}:${BACKUP_USER}" "/home/${BACKUP_USER}/.ssh"
 sudo chmod 700 "/home/${BACKUP_USER}/.ssh"
 sudo chmod 600 "/home/${BACKUP_USER}/.ssh/authorized_keys"
+
+msg_info "Creating backup user group and adding user to it..."
+if ! getent group backup-admins &>/dev/null; then
+    sudo groupadd backup-admins
+    msg_succ "Backup group created successfully."
+else
+    msg_succ "Backup group already exists."
+fi
+
+sudo usermod -aG backup-admins "${BACKUP_USER}"
+sudo usermod -aG backup-admins "$(whoami)"
+
+msg_info "Applying group permissions to the backup repository..."
+sudo chown -R "${BACKUP_USER}:${BACKUP_GROUP}" "${BACKUP_REPO_DIR}"
+
+sudo chmod -R g+rX "${BACKUP_REPO_DIR}"
+msg_succ "Group permissions applied successfully."
+
 msg_succ "Local backup environment is ready."
 
 msg_step "4" "${TOTAL_STEPS}" "Creating secrets file with Ansible Vault..."
@@ -145,6 +164,7 @@ default_admin_user: "$ADMIN_USER"
 admin_pass: "$ADMIN_PASS"
 hashed_admin_pass: "$HASHED_PASS"
 restic_password: "$RESTIC_PASS"
+ansible_controller_ip: "$ANSIBLE_CONTROLLER_IP"
 EOF
 )
 
