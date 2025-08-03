@@ -1,0 +1,110 @@
+- name: GitLab | Define instance variables
+  ansible.builtin.set_fact:
+    gitlab_domain: "gitlab.luk3rr.com"
+    registry_domain: "registry.gitlab.luk3rr.com"
+
+- name: GitLab | Download dependencies and install the Omnibus installer script
+  block:
+  - name: GitLab | Install dependencies
+    ansible.builtin.apt:
+      name: ['curl', 'ca-certificates', 'postfix', 'openssh-server', 'tzdata', 'perl', 'python3-cryptography']
+      state: present
+      update_cache: yes
+
+  - name: GitLab | Download and run the Omnibus installer script
+    ansible.builtin.shell:
+      cmd: curl -sS https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | bash
+      creates: /etc/apt/sources.list.d/gitlab_gitlab-ce.list
+
+- name: GitLab | Install GitLab CE
+  block:
+  - name: GitLab | Install the GitLab CE package
+    ansible.builtin.apt:
+      name: "gitlab-ce=17.11.6-ce.0"
+      state: present
+
+  - name: GitLab | Hold the GitLab CE package to prevent upgrades
+    ansible.builtin.dpkg_selections:
+      name: gitlab-ce
+      selection: hold
+
+- name: GitLab | Create certificates
+  block:
+  - name: GitLab | Create SSL directory
+    ansible.builtin.file:
+      path: /etc/gitlab/ssl
+      state: directory
+      owner: root
+      group: root
+      mode: '0700'
+
+  - name: GitLab | Generate a private key for the main domain
+    community.crypto.openssl_privatekey:
+      path: "/etc/gitlab/ssl/{{ gitlab_domain }}.key"
+      size: 4096
+      mode: '0600'
+      type: RSA
+
+  - name: GitLab | Generate a self-signed certificate for the main domain
+    community.crypto.x509_certificate:
+      path: "/etc/gitlab/ssl/{{ gitlab_domain }}.crt"
+      privatekey_path: "/etc/gitlab/ssl/{{ gitlab_domain }}.key"
+      provider: selfsigned
+      selfsigned_not_after: "+3650d"
+      mode: '0644'
+
+  - name: GitLab | Generate a private key for the main domain
+    community.crypto.openssl_privatekey:
+      path: "/etc/gitlab/ssl/{{ registry_domain }}.key"
+      size: 4096
+      mode: '0600'
+      type: RSA
+
+  - name: GitLab | Generate a self-signed certificate for the main domain
+    community.crypto.x509_certificate:
+      path: "/etc/gitlab/ssl/{{ registry_domain }}.crt"
+      privatekey_path: "/etc/gitlab/ssl/{{ registry_domain }}.key"
+      provider: selfsigned
+      selfsigned_not_after: "+3650d"
+      mode: '0644'
+
+- name: GitLab | Configure and start GitLab services
+  block:
+  - name: GitLab | Run INITIAL reconfigure to bootstrap the environment
+    ansible.builtin.command:
+      cmd: gitlab-ctl reconfigure
+      chdir: /etc/gitlab
+      creates: /var/opt/gitlab/gitlab-rails/etc/secrets.yml
+    async: 900
+    poll: 15
+
+  - name: GitLab | Copy the custom gitlab.rb configuration template
+    ansible.builtin.template:
+      src: gitlab.rb.j2
+      dest: /etc/gitlab/gitlab.rb
+      owner: root
+      group: root
+      mode: '0600'
+    register: gitlab_config
+
+  - name: Reconfigure GitLab
+    ansible.builtin.command:
+      cmd: gitlab-ctl reconfigure
+      chdir: /etc/gitlab
+    when: gitlab_config.changed
+    register: reconfigure_result
+
+  - name: Restart GitLab
+    ansible.builtin.command:
+      cmd: gitlab-ctl restart
+    when: reconfigure_result is defined and reconfigure_result.rc == 0 and gitlab_config.changed
+
+- name: GitLab | Schedule daily backups via cron
+  ansible.builtin.cron:
+    name: "GitLab daily backup"
+    minute: "0"
+    hour: "2"
+    user: root
+    job: "/usr/bin/gitlab-backup create CRON=1"
+    cron_file: "gitlab-backup"
+

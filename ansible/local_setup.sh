@@ -153,6 +153,46 @@ while true; do
     esac
 done
 
+msg_step "6" "${TOTAL_STEPS}" "Getting information for GitLab..."
+msg_info "Email gitlab user will be used to send notifications and alerts"
+
+while true; do
+  read -p "Enter email for GitLab: " GITLAB_EMAIL
+
+  msg_info "The email you entered is: $GITLAB_EMAIL"
+  read -p "Is this correct? (y/n): " confirm_email
+
+  if [[ "$confirm_email" =~ ^[Yy]$ ]]; then
+    if [[ "$GITLAB_EMAIL" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+      break
+    else
+      msg_error "Invalid email format. Please try again."
+    fi
+    break
+  else
+    msg_error "Please re-enter the email."
+  fi
+done
+
+msg_info "Now, is necessary generate a token for GitLab use the email ${GITLAB_EMAIL} to send notifications and alerts."
+msg_info "If you using gmail, read the instructions at https://support.google.com/mail/answer/185833?hl=en"
+msg_info "After generating the token, copy it and paste it below."
+
+while true; do
+    read -sp "Enter the GitLab token: " GITLAB_TOKEN
+    echo
+    read -sp "Confirm the GitLab token: " GITLAB_TOKEN_CONFIRM
+    echo
+    if [ "$GITLAB_TOKEN" = "$GITLAB_TOKEN_CONFIRM" ]; then
+        msg_succ "GitLab token confirmed."
+        break
+    else
+        msg_error "Tokens do not match. Please try again."
+    fi
+done
+
+msg_succ "Gitlab information collected successfully"
+
 msg_step "6" "${TOTAL_STEPS}" "Generating and encrypting variables..."
 
 msg_info "Generating bcrypt hash for the admin password..."
@@ -165,6 +205,8 @@ admin_pass: "$ADMIN_PASS"
 hashed_admin_pass: "$HASHED_PASS"
 restic_password: "$RESTIC_PASS"
 ansible_controller_ip: "$ANSIBLE_CONTROLLER_IP"
+homelab_email_user: "$GITLAB_EMAIL"
+homelab_email_token: "$GITLAB_TOKEN"
 EOF
 )
 
