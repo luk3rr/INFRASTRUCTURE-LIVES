@@ -13,6 +13,7 @@ PLAYBOOKS_DIR="playbooks"
 SERVICE_PLAYBOOKS=(
   "adguard"
   "npm"
+  "kuma"
 )
 
 # =================================================================================

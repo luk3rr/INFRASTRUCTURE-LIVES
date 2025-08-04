@@ -1,0 +1,7 @@
+- name: Deploy Uptime Kuma
+  hosts: kuma
+  become: yes
+  roles:
+    - kuma
+  vars:
+    uptime_kuma_dir: /opt/uptime-kuma

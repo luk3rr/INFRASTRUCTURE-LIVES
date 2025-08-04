@@ -1,0 +1,58 @@
+---
+- name: Install required system dependencies
+  apt:
+    name: ['curl', 'git']
+    state: present
+    update_cache: yes
+
+- name: Download Node.js 18.x setup script
+  get_url:
+    url: https://deb.nodesource.com/setup_18.x
+    dest: /tmp/nodesource_setup.sh
+    mode: '0755'
+
+- name: Run Node.js setup script
+  command: /tmp/nodesource_setup.sh
+  args:
+    creates: /etc/apt/sources.list.d/nodesource.list
+
+- name: Install Node.js
+  apt:
+    name: nodejs
+    state: present
+
+- name: Uptime Kuma | Install PM2 and PM2-Logrotate globally
+  community.general.npm:
+    name: "{{ item }}"
+    global: yes
+    state: present
+  loop:
+    - pm2
+    - pm2-logrotate
+
+- name: Clone the Uptime Kuma repository
+  git:
+    repo: https://github.com/louislam/uptime-kuma.git
+    dest: "{{ uptime_kuma_dir }}"
+    version: master
+
+- name: Run 'npm run setup'
+  command: npm run setup
+  args:
+    chdir: "{{ uptime_kuma_dir }}"
+    creates: "{{ uptime_kuma_dir }}/node_modules"
+
+- name: Start Uptime Kuma with PM2
+  command: >
+    pm2 start server/server.js --name uptime-kuma
+  args:
+    chdir: "{{ uptime_kuma_dir }}"
+
+- name: Enable PM2 startup on system boot
+  command: pm2 startup systemd -u root --hp /root
+  register: startup_script
+  changed_when: "'systemctl' in startup_script.stdout"
+
+- name: Save current PM2 process list
+  command: pm2 save
+  when: startup_script.changed
