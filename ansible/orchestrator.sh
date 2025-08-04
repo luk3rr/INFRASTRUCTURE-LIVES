@@ -10,17 +10,22 @@ source "$BASH_BEAUTIFUL"
 
 PLAYBOOKS_DIR="playbooks"
 
+# Service : Parameters
 SERVICE_PLAYBOOKS=(
-  "adguard"
-  "npm"
-  "kuma"
+  "gitlab:--ask-vault-pass"
+  "adguard:--ask-vault-pass"
+  "npm:"
+  "kuma:"
+  "heimdall:"
 )
 
 # =================================================================================
 # MENU PRINCIPAL
 # =================================================================================
+
 msg_title "Service Installation Orchestrator"
 PS3="Choose an installation option: "
+
 options=("Install a Specific Service" "Install ALL Services" "Exit")
 
 select opt in "${options[@]}"; do
@@ -28,11 +33,24 @@ select opt in "${options[@]}"; do
     "Install a Specific Service")
       msg_alert "Select the service you want to install:"
 
-      select target_service in "${SERVICE_PLAYBOOKS[@]}"; do
+      service_names=()
+      for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+        service_name="${entry%%:*}"
+        service_names+=("$service_name")
+      done
+
+      select target_service in "${service_names[@]}"; do
         if [[ -n "$target_service" ]]; then
-          msg_info "Starting installation of '${target_service}'..."
-          ansible-playbook "${PLAYBOOKS_DIR}/${target_service}.yml" --ask-vault-pass
-          msg_succ "Installation of '${target_service}' completed."
+          for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+            name="${entry%%:*}"
+            params="${entry#*:}"
+            if [[ "$name" == "$target_service" ]]; then
+              msg_info "Starting installation of '${name}'..."
+              ansible-playbook "${PLAYBOOKS_DIR}/${name}.yml" $params
+              msg_succ "Installation of '${name}' completed."
+              break
+            fi
+          done
           break
         else
           msg_error "Invalid selection."
@@ -42,13 +60,19 @@ select opt in "${options[@]}"; do
       ;;
 
     "Install ALL Services")
-      msg_alert "You are about to install ALL services: ${SERVICE_PLAYBOOKS[*]}"
+      msg_alert "You are about to install ALL services:"
+      for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+        echo "  - ${entry%%:*}"
+      done
       read -p "Do you confirm this operation? (y/n): " confirm
+
       if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        for service in "${SERVICE_PLAYBOOKS[@]}"; do
-          msg_title "Starting installation of '${service}'"
-          ansible-playbook "${PLAYBOOKS_DIR}/${service}.yml" --ask-vault-pass
-          msg_succ "Installation of '${service}' completed."
+        for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+          name="${entry%%:*}"
+          params="${entry#*:}"
+          msg_title "Starting installation of '${name}'"
+          ansible-playbook "${PLAYBOOKS_DIR}/${name}.yml" $params
+          msg_succ "Installation of '${name}' completed."
         done
         msg_succ "All services installed successfully!"
       else
@@ -60,6 +84,7 @@ select opt in "${options[@]}"; do
     "Exit")
       break
       ;;
+
     *)
       msg_error "Invalid option: $REPLY"
       ;;

@@ -1,0 +1,100 @@
+- name: Heimdall | Install PHP and dependencies
+  block:
+    - name: Install prerequisites for adding repositories
+      ansible.builtin.apt:
+        name: [ 'apt-transport-https', 'ca-certificates', 'curl' ]
+        state: present
+        update_cache: yes
+
+    - name: Add Ondrej Sury's PHP GPG key
+      ansible.builtin.get_url:
+        url: https://packages.sury.org/php/apt.gpg
+        dest: /usr/share/keyrings/deb.sury.org-php.gpg
+        mode: '0644'
+        force: true
+
+    - name: Add Ondrej Sury's PHP repository
+      ansible.builtin.apt_repository:
+        repo: "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ {{ ansible_lsb.codename }} main"
+        state: present
+        filename: php
+
+    - name: Install Nginx, Git, and specific PHP 8.1 packages
+      ansible.builtin.apt:
+        name:
+          - nginx
+          - git
+          - php8.2-fpm
+          - php8.2-ctype
+          - php8.2-curl
+          - php8.2-dom
+          - php8.2-fileinfo
+          - php8.2-mbstring
+          - php8.2-pdo
+          - php8.2-tokenizer
+          - php8.2-xml
+          - php8.2-sqlite3
+          - php8.2-zip
+        state: present
+
+- name: Heimdall | Clone Heimdall repository from GitHub
+  ansible.builtin.git:
+    repo: 'https://github.com/linuxserver/Heimdall.git'
+    dest: /opt/heimdall
+    version: 'v2.7.4'
+    force: true
+
+- name: Heimdall | Configure Nginx site
+  ansible.builtin.template:
+    src: heimdall.conf.j2
+    dest: /etc/nginx/sites-available/heimdall
+  notify: Restart Nginx
+
+- name: Heimdall | Enable the Nginx site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/heimdall
+    dest: /etc/nginx/sites-enabled/heimdall
+    state: link
+  notify: Restart Nginx
+
+- name: Heimdall | Remove the default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Restart Nginx
+
+- name: Heimdall | Configure Heimdall application
+  block:
+    - name: Create .env file from example
+      ansible.builtin.command:
+        cmd: cp .env.example .env
+        chdir: /opt/heimdall
+        creates: /opt/heimdall/.env
+
+    - name: Generate Laravel application key
+      ansible.builtin.command:
+        cmd: php artisan key:generate
+        chdir: /opt/heimdall
+      register: key_generate_result
+      changed_when: "'Application key set successfully' in key_generate_result.stdout"
+
+- name: Heimdall | Set correct ownership and permissions
+  block:
+    - name: Set ownership of the entire application to www-data
+      ansible.builtin.file:
+        path: /opt/heimdall
+        state: directory
+        owner: www-data
+        group: www-data
+        recurse: yes
+
+    - name: Ensure storage and cache directories are writable
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0775'
+        recurse: yes
+      loop:
+        - /opt/heimdall/storage
+        - /opt/heimdall/bootstrap/cache
+
