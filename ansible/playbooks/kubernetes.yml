@@ -1,0 +1,32 @@
+- name: Deploy K3s Kubernetes Cluster
+  hosts: k8s-node
+  become: yes
+  gather_facts: yes
+  roles:
+    - k3s
+
+- name: Configure local kubectl for the new cluster
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Ensure .kube directory exists in your home folder
+      ansible.builtin.file:
+        path: "{{ lookup('env', 'HOME') }}/.kube"
+        state: directory
+        mode: '0755'
+
+    - name: Merge fetched kubeconfig with existing config
+      ansible.builtin.shell: |
+        KUBECONFIG={{ lookup('env', 'HOME') }}/.kube/config:fetched_kubeconfigs/k8s-node \
+        kubectl config view --flatten > /tmp/merged_kubeconfig && \
+        mv /tmp/merged_kubeconfig {{ lookup('env', 'HOME') }}/.kube/config
+      args:
+        executable: /bin/bash
+
+    - name: Display confirmation and instructions
+      ansible.builtin.debug:
+        msg:
+          - "Setup complete! Your kubectl is now configured."
+          - "To see all available cluster contexts, run: kubectl config get-contexts"
+          - "To switch to the new K3s cluster, run: kubectl config use-context default"

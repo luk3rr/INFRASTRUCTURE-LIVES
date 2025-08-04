@@ -1,0 +1,66 @@
+- name: K3s | Prepare the node
+  block:
+    - name: Disable swap
+      ansible.posix.mount:
+        name: none
+        fstype: swap
+        state: absent
+
+    - name: Remove swap entry from /etc/fstab
+      ansible.builtin.lineinfile:
+        path: /etc/fstab
+        regexp: '\sswap\s'
+        state: absent
+
+    - name: Ensure br_netfilter module is loaded
+      community.general.modprobe:
+        name: br_netfilter
+        state: present
+
+    - name: Ensure kernel parameters for Kubernetes are set
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+      loop:
+        - net.bridge.bridge-nf-call-iptables
+        - net.ipv4.ip_forward
+
+- name: K3s | 2. Install K3s server
+  ansible.builtin.shell:
+    cmd: curl -sfL https://get.k3s.io | sh -
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: K3s | 3. Configure kubeconfig for the local user
+  block:
+    - name: Ensure .kube directory exists
+      ansible.builtin.file:
+        path: "/home/{{ ansible_user }}/.kube"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Copy k3s.yaml to user's kubeconfig
+      ansible.builtin.copy:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "/home/{{ ansible_user }}/.kube/config"
+        remote_src: yes
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0600'
+
+    - name: Replace localhost with the node's IP in kubeconfig
+      ansible.builtin.replace:
+        path: "/home/{{ ansible_user }}/.kube/config"
+        regexp: '127\.0\.0\.1'
+        replace: "{{ ansible_host }}"
+
+- name: K3s | 4. Fetch the kubeconfig file to the local machine
+  ansible.builtin.fetch:
+    src: "/home/{{ ansible_user }}/.kube/config"
+    dest: "fetched_kubeconfigs/{{ inventory_hostname }}"
+    flat: yes

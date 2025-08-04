@@ -3,6 +3,8 @@
 # Ansible
 **/group_vars/
 **/secrets.yml
+**/fetched*
+**/collections*
 
 # Terraform
 **/.terraform
