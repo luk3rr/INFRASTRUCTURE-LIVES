@@ -1,0 +1,85 @@
+- name: Vault | 1. Install prerequisite packages
+  ansible.builtin.apt:
+    name:
+      - unzip
+      - curl
+      - gnupg
+      - software-properties-common
+    state: present
+    update_cache: yes
+
+- name: Vault | 2. Add HashiCorp GPG key and repository
+  block:
+    - name: Add HashiCorp GPG key using apt-key
+      ansible.builtin.apt_key:
+        url: https://apt.releases.hashicorp.com/gpg
+        state: present
+
+    - name: Add HashiCorp repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://apt.releases.hashicorp.com {{ ansible_lsb.codename }} main"
+        state: present
+        filename: hashicorp
+
+- name: Vault | 3. Install HashiCorp Vault
+  ansible.builtin.apt:
+    name: vault
+    state: present
+    update_cache: yes # Ensures the new repository is read
+
+- name: Vault | 4. Create Vault user and directories
+  block:
+    - name: Create a user for Vault
+      ansible.builtin.user:
+        name: vault
+        system: yes
+        shell: /bin/false
+        home: /etc/vault.d
+
+    - name: Create Vault data directory
+      ansible.builtin.file:
+        path: /opt/vault/data
+        state: directory
+        owner: vault
+        group: vault
+        mode: '0750'
+
+- name: Vault | 5. Create Vault configuration file
+  ansible.builtin.template:
+    src: vault.hcl.j2
+    dest: /etc/vault.d/vault.hcl
+    owner: vault
+    group: vault
+    mode: '0640'
+  notify: Restart Vault
+
+- name: Vault | 6. Create systemd service file
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/vault.service
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      [Unit]
+      Description="HashiCorp Vault - A tool for managing secrets"
+      Documentation=https://www.vaultproject.io/docs/
+      Requires=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=vault
+      Group=vault
+      ExecStart=/usr/bin/vault server -config=/etc/vault.d/vault.hcl
+      Restart=on-failure
+      LimitMEMLOCK=infinity
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: Restart Vault
+
+- name: Vault | 7. Enable and start the Vault service
+  ansible.builtin.systemd:
+    name: vault
+    state: started
+    enabled: yes
+    daemon_reload: yes
