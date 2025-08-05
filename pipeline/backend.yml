@@ -1,0 +1,6 @@
+include:
+  - local: 'pipeline/build-app.yml'
+  - local: 'pipeline/deploy_app.yml'
+  - local: 'pipeline/build_migration.yml'
+  - local: 'pipeline/deploy_migration.yml'
+  - local: 'pipeline/deploy_migration_rollback.yml'

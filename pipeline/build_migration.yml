@@ -1,0 +1,24 @@
+build_migration:
+  image: docker:24.0.5
+  stage: build
+  needs:
+    - job: unit_test
+      artifacts: true
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    REGISTRY_URL: "registry.gitlab.luk3rr.com"
+    IMAGE_TAG: "migration-${CI_PIPELINE_ID}"
+  before_script:
+    - echo "Building Docker image for migration $SERVICE_NAME with tag $IMAGE_TAG"
+  script:
+    - unset DOCKER_HOST
+    - PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+    - IMAGE_NAME="${REGISTRY_URL}/${SERVICE_GROUP}/${PROJECT_NAME_LOWER}:${IMAGE_TAG}"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker build -t "$IMAGE_NAME" -f liquibase.Dockerfile .
+    - docker push "$IMAGE_NAME"
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_MERGE_REQUEST_ID'
+      when: on_success
+    - when: never
+      allow_failure: false

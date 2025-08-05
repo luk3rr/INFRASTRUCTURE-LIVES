@@ -1,0 +1,37 @@
+deploy_migration_rollback:
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  stage: deploy
+  dependencies:
+    - build_migration
+  variables:
+    REGISTRY_URL: "registry.gitlab.luk3rr.com"
+    IMAGE_TAG: "migration-${CI_PIPELINE_ID}"
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+    - apk add --no-cache curl jq gettext
+  script:
+    - NAMESPACE=$SERVICE_NAME
+    - |
+      if ! kubectl get namespace $NAMESPACE > /dev/null 2>&1; then
+        echo "Namespace $NAMESPACE does not exist. Creating it."
+        kubectl create namespace $NAMESPACE
+      fi
+    - echo "Deploying using manifest $MIGRATION_DEPLOY_MANIFEST_PATH with image tag $IMAGE_TAG in namespace $NAMESPACE"
+    - PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+    - IMAGE_NAME="${REGISTRY_URL}/${SERVICE_GROUP}/${PROJECT_NAME_LOWER}"
+    - echo "Using image ${IMAGE_NAME}:${IMAGE_TAG}"
+
+    - cp $MIGRATION_DEPLOY_MANIFEST_PATH tmp_migration.yml
+    - sed -i "s|\${IMAGE_NAME}|$IMAGE_NAME|g; s|\${IMAGE_TAG}|$IMAGE_TAG|g; s|\${LIQUIBASE_COMMAND}|rollbackCount 1|g;" tmp_migration.yml
+
+    - kubectl delete job $SERVICE_NAME-db-migration -n $SERVICE_NAME --ignore-not-found
+    - kubectl apply -n $SERVICE_NAME -f tmp_migration.yml
+
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main" || $CI_MERGE_REQUEST_ID'
+      when: manual
+    - when: never
+      allow_failure: false

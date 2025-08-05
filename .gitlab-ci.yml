@@ -1,0 +1,195 @@
+variables:
+  SERVICE_GROUP: "personal/projects"
+  PROJECT_NAME: "INFRASTRUCTURE_LIVES"
+  POSTGRES_DEPLOY_MANIFEST: "database/postgres.yml"
+  POSTGRES_NAMESPACE: "database"
+  EXCALIDRAW_DEPLOY_MANIFEST: "excalidraw/excalidraw.yml"
+  EXCALIDRAW_NAMESPACE: "excalidraw"
+  VAULT_INJECTOR_DEPLOY_MANIFEST: "vault/vault_agent_injector.yml"
+  VAULT_NAMESPACE: "vault"
+  METALLB_NATIVE_MANIFEST_URL: https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
+  LOAD_BALANCER_DEPLOY_MANIFEST: "loadbalancer/metallb-setup.yml"
+  METALLB_NAMESPACE: "metallb-system"
+  LOAD_BALANCER_SERVICES_MANIFESTS_PATH: "loadbalancer/service"
+  SERVICE_ACCOUNT_MANIFESTS_PATH: "serviceaccount"
+  BUILD_CACHE_PATH: "/cache/.gradle"
+
+cache:
+  paths:
+    - /cache/.gradle/wrapper/
+    - /cache/.gradle/caches/
+
+stages:
+  - setup
+  - destroy
+
+config_service_accounts:
+  stage: setup
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - |
+      echo "Applying all manifests from the $SERVICE_ACCOUNT_MANIFESTS_PATH directory"
+      kubectl apply -f $SERVICE_ACCOUNT_MANIFESTS_PATH
+  rules:
+    - when: manual
+
+config_metallb:
+  stage: setup
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+    - apk add --no-cache jq
+  variables:
+    SERVICE_NAME: metallb-system
+  script:
+    - |
+      if ! kubectl get namespace $METALLB_NAMESPACE > /dev/null 2>&1; then
+          echo "Namespace $METALLB_NAMESPACE does not exist. Creating it."
+          kubectl create namespace $METALLB_NAMESPACE
+      fi
+    - echo "Applying MetalLB native manifest..."
+    - kubectl apply -f "$METALLB_NATIVE_MANIFEST_URL"
+    - echo "Applying MetalLB IP address pool configuration..."
+    - echo "Waiting for MetalLB controller and speaker pods to be ready..."
+    - kubectl wait --namespace "$METALLB_NAMESPACE" --for=condition=ready pod --selector=app=metallb --timeout=180s
+    - kubectl apply -f "$LOAD_BALANCER_DEPLOY_MANIFEST"
+    - echo "Waiting for MetalLB pods to be ready..."
+    - kubectl wait --namespace "$METALLB_NAMESPACE" --for=condition=ready pod --all --timeout=120s
+    - |
+      echo "Applying LoadBalancer services..."
+      for service_manifest in "$LOAD_BALANCER_SERVICES_MANIFESTS_PATH"/*.yml; do
+          ns=$(grep -E '^\s*namespace:' "$service_manifest" | head -n1 | awk '{print $2}')
+      
+          if [[ -n "$ns" ]]; then
+              if ! kubectl get namespace "$ns" > /dev/null 2>&1; then
+                  echo "Namespace '$ns' not found. Creating it..."
+                  kubectl create namespace "$ns"
+              fi
+          else
+              echo "No namespace specified in $service_manifest, assuming 'default'."
+          fi
+      
+          for attempt in $(seq 1 3); do
+              echo "Applying $service_manifest (attempt $attempt)..."
+              if kubectl apply -f "$service_manifest"; then
+                  echo "Successfully applied $service_manifest"
+                  break
+              elif [[ "$attempt" -eq 3 ]]; then
+                  echo "Failed to apply $service_manifest after 3 attempts"
+                  exit 1
+              else
+                  echo "Retrying in 3 seconds..."
+                  sleep 3
+              fi
+          done
+      done
+    - echo "All LoadBalancer services applied successfully."
+  rules:
+    - when: manual
+
+deploy_vault_agent_injector:
+  stage: setup
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  variables:
+    RELEASE_NAME: vault
+    SERVICE_NAME: vault-agent-injector
+  before_script:
+    - apk add --no-cache curl bash openssl git
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - |
+      if ! kubectl get namespace $VAULT_NAMESPACE > /dev/null 2>&1; then
+        echo "Namespace $VAULT_NAMESPACE does not exist. Creating it."
+        kubectl create namespace $VAULT_NAMESPACE
+      fi
+    - |
+      echo "Installing helm..."
+      curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      helm repo add hashicorp https://helm.releases.hashicorp.com
+      helm repo update
+      helm upgrade --install $RELEASE_NAME hashicorp/vault \
+        --namespace $VAULT_NAMESPACE \
+        --values $VAULT_INJECTOR_DEPLOY_MANIFEST
+    - echo "Waiting for Vault Injector deployment to be ready..."
+    - kubectl rollout status deployment/$SERVICE_NAME -n $VAULT_NAMESPACE --timeout=120s
+  rules:
+    - when: manual
+
+deploy_postgres:
+  stage: setup
+  needs:
+    - job: config_service_accounts
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  variables:
+    SERVICE_NAME: postgres
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - |
+      if ! kubectl get namespace $POSTGRES_NAMESPACE > /dev/null 2>&1; then
+          echo "Namespace $POSTGRES_NAMESPACE does not exist. Creating it."
+          kubectl create namespace $POSTGRES_NAMESPACE
+      fi
+    - kubectl apply -f $POSTGRES_DEPLOY_MANIFEST -n $POSTGRES_NAMESPACE
+    - echo "Waiting for Postgres deployment to be ready..."
+    - kubectl rollout status deployment/$SERVICE_NAME -n "$POSTGRES_NAMESPACE" --timeout=120s
+  rules:
+    - when: manual
+
+deploy_excalidraw:
+  stage: setup
+  needs:
+    - job: config_service_accounts
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  variables:
+    SERVICE_NAME: excalidraw
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - |
+      if ! kubectl get namespace $EXCALIDRAW_NAMESPACE > /dev/null 2>&1; then
+          echo "Namespace $EXCALIDRAW_NAMESPACE does not exist. Creating it."
+          kubectl create namespace $EXCALIDRAW_NAMESPACE
+      fi
+    - kubectl apply -f $EXCALIDRAW_DEPLOY_MANIFEST -n $EXCALIDRAW_NAMESPACE
+    - echo "Waiting for Excalidraw deployment to be ready..."
+    - kubectl rollout status deployment/$SERVICE_NAME -n "$EXCALIDRAW_NAMESPACE" --timeout=120s
+  rules:
+    - when: manual
+
+destroy_infra:
+  stage: destroy
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - kubectl delete -f $VAULT_INJECTOR_DEPLOY_MANIFEST -n $VAULT_NAMESPACE --ignore-not-found
+    - kubectl delete -f $POSTGRES_DEPLOY_MANIFEST -n $POSTGRES_NAMESPACE --ignore-not-found
+    - kubectl delete -f $LOAD_BALANCER_DEPLOY_MANIFEST -n $METALLB_NAMESPACE --ignore-not-found
+    - kubectl delete -f $LOAD_BALANCER_SERVICES_MANIFESTS_PATH --ignore-not-found
+    - kubectl delete -f $METALLB_NATIVE_MANIFEST_URL --ignore-not-found
+    - kubectl delete namespace $METALLB_NAMESPACE --ignore-not-found
+    - kubectl delete namespace $POSTGRES_NAMESPACE --ignore-not-found
+    - kubectl delete namespace $VAULT_NAMESPACE --ignore-not-found
+  rules:
+    - when: manual

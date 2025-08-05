@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: p2p-chat-service
+  namespace: p2p-chat
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  loadBalancerIP: 192.168.1.233
+  selector:
+    app: p2p-chat
+  ports:
+    - protocol: TCP
+      port: 51511
+      targetPort: 51511
