@@ -1,0 +1,15 @@
+- name: Docker | Install prerequisite packages
+  ansible.builtin.apt:
+    name: ['ca-certificates', 'curl']
+    state: present
+    update_cache: yes
+
+- name: Docker | Download and run the official Docker convenience script
+  ansible.builtin.shell:
+    cmd: curl -fsSL https://get.docker.com | sh
+    creates: /usr/bin/docker
+
+- name: Docker | Install Docker SDK for Python
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present

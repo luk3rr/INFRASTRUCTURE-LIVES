@@ -9,27 +9,57 @@ set -e
 source "$BASH_BEAUTIFUL"
 
 PLAYBOOKS_DIR="playbooks"
+SECRETS_FILE="group_vars/secrets.yml"
 
 # Service : Parameters
 SERVICE_PLAYBOOKS=(
-  "gitlab:--ask-vault-pass"
-  "adguard:--ask-vault-pass"
-  "npm:"
-  "kuma:"
-  "heimdall:"
-  "vault:"
-  "kubernetes:"
-  "postgres:--ask-vault-pass"
+  "adguard:--ask-vault-pass:"
+  "npm::"
+  "kuma::"
+  "heimdall::"
+  "vault::"
+  "postgres:--ask-vault-pass:"
+  "kubernetes::"
+  "gitlab:--ask-vault-pass:"
+  "gitlab-runner:--ask-vault-pass:gitlab_runner_token"
 )
 
-# =================================================================================
-# MENU PRINCIPAL
-# =================================================================================
+check_and_set_secret() {
+  local secret_key="$1"
+  local prompt_message="$2"
+
+  if [[ -z "$VAULT_PASS" ]]; then
+    read -sp "Enter Ansible Vault password to check/edit secrets: " VAULT_PASS
+    echo
+  fi
+
+  local secret_exists
+  secret_exists=$(ansible-vault view "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS") 2>/dev/null | grep "^${secret_key}:" || true)
+
+  if [[ -z "$secret_exists" ]]; then
+    msg_alert "The secret '${secret_key}' was not found in the Vault."
+    read -p "${prompt_message}: " secret_value
+
+    local temp_file
+    temp_file=$(mktemp)
+    ansible-vault decrypt "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS") --output "${temp_file}" 2>/dev/null
+
+    printf "\n%s: %s" "$secret_key" "$secret_value" >> "${temp_file}"
+
+    ansible-vault encrypt "${temp_file}" --vault-password-file <(printf "%s" "$VAULT_PASS") --output "${SECRETS_FILE}" 2>/dev/null
+
+    rm "${temp_file}"
+
+    msg_succ "Secret '${secret_key}' has been added to the Vault successfully."
+  else
+    msg_succ "Secret '${secret_key}' already exists in the Vault."
+  fi
+}
 
 msg_title "Service Installation Orchestrator"
 PS3="Choose an installation option: "
 
-options=("Install a Specific Service" "Install ALL Services" "Exit")
+options=("Install a Specific Service" "Exit")
 
 select opt in "${options[@]}"; do
   case $opt in
@@ -38,56 +68,44 @@ select opt in "${options[@]}"; do
 
       service_names=()
       for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-        service_name="${entry%%:*}"
-        service_names+=("$service_name")
+        service_names+=("$(echo "$entry" | cut -d':' -f1)")
       done
 
       select target_service in "${service_names[@]}"; do
         if [[ -n "$target_service" ]]; then
           for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-            name="${entry%%:*}"
-            params="${entry#*:}"
+            name=$(echo "$entry" | cut -d':' -f1)
+            params=$(echo "$entry" | cut -d':' -f2)
+            secret_key=$(echo "$entry" | cut -d':' -f3)
+
             if [[ "$name" == "$target_service" ]]; then
+              CMD="ansible-playbook ${PLAYBOOKS_DIR}/${name}.yml"
+
+              if [[ "$params" == "--ask-vault-pass" ]]; then
+                if [[ -n "$secret_key" ]]; then
+                  check_and_set_secret "$secret_key" "Please, enter the value for '${secret_key}'"
+                elif [[ -z "$VAULT_PASS" ]]; then
+                   read -sp "Enter Ansible Vault password: " VAULT_PASS
+                   echo
+                fi
+                CMD+=" --vault-password-file <(printf \"%s\" \"$VAULT_PASS\")"
+              fi
+
               msg_info "Starting installation of '${name}'..."
-              ansible-playbook "${PLAYBOOKS_DIR}/${name}.yml" $params
+              eval "$CMD"
               msg_succ "Installation of '${name}' completed."
               break
             fi
           done
-          break
         else
           msg_error "Invalid selection."
         fi
       done
       break
       ;;
-
-    "Install ALL Services")
-      msg_alert "You are about to install ALL services:"
-      for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-        echo "  - ${entry%%:*}"
-      done
-      read -p "Do you confirm this operation? (y/n): " confirm
-
-      if [[ "$confirm" =~ ^[Yy]$ ]]; then
-        for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-          name="${entry%%:*}"
-          params="${entry#*:}"
-          msg_title "Starting installation of '${name}'"
-          ansible-playbook "${PLAYBOOKS_DIR}/${name}.yml" $params
-          msg_succ "Installation of '${name}' completed."
-        done
-        msg_succ "All services installed successfully!"
-      else
-        msg_error "Operation cancelled."
-      fi
-      break
-      ;;
-
     "Exit")
       break
       ;;
-
     *)
       msg_error "Invalid option: $REPLY"
       ;;
