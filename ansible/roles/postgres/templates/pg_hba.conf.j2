@@ -1,0 +1,8 @@
+# Conexões via socket Unix (locais)
+local   all             all                                     peer
+# Conexões IPv4 locais (localhost)
+host    all             all             127.0.0.1/32            scram-sha-256
+# Permite conexões IPv4 da rede locaL
+host    all             all             192.168.1.0/24          scram-sha-256
+# Conexões IPv6 locais
+host    all             all             ::1/128                 scram-sha-256

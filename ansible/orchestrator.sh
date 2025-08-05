@@ -19,6 +19,7 @@ SERVICE_PLAYBOOKS=(
   "heimdall:"
   "vault:"
   "kubernetes:"
+  "postgres:--ask-vault-pass"
 )
 
 # =================================================================================

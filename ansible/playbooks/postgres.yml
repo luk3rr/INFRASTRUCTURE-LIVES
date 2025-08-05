@@ -1,0 +1,8 @@
+- name: Deploy PostgreSQL Server
+  hosts: postgres
+  become: yes
+  gather_facts: yes
+  roles:
+    - postgres
+  vars_files:
+    - ../group_vars/secrets.yml

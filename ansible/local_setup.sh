@@ -14,7 +14,7 @@ GROUP_VARS_DIR="group_vars"
 SECRETS_FILE="${GROUP_VARS_DIR}/secrets.yml"
 BACKUP_USER="restic-backup"
 BACKUP_REPO_DIR="/home/${BACKUP_USER}/repo"
-TOTAL_STEPS=7
+TOTAL_STEPS=8
 
 set -e
 
@@ -195,7 +195,39 @@ done
 
 msg_succ "Gitlab information collected successfully"
 
-msg_step "6" "${TOTAL_STEPS}" "Generating and encrypting variables..."
+msg_step "7" "${TOTAL_STEPS}" "Choosing PostgreSQL password..."
+
+msg_info "Now, let's set the PostgreSQL password for the default admin user."
+while true; do
+    read -p "Use the default admin password for PostgreSQL? (y/n): " use_default_pass
+    case "$use_default_pass" in
+        [Yy]* )
+            POSTGRES_PASS="$ADMIN_PASS"
+            msg_succ "PostgreSQL password set to the admin password."
+            break
+            ;;
+        [Nn]* )
+            read -sp "Enter the PostgreSQL password for the default admin: " POSTGRES_PASS
+            echo
+            read -sp "Confirm the PostgreSQL password: " POSTGRES_PASS_CONFIRM
+            echo
+
+            if [ "$POSTGRES_PASS" = "$POSTGRES_PASS_CONFIRM" ]; then
+                msg_succ "PostgreSQL password set successfully."
+                break
+            else
+                msg_error "Passwords do not match. Please try again."
+            fi
+            ;;
+        * )
+            msg_error "Please answer yes (y) or no (n)."
+        ;;
+    esac
+done
+
+msg_info "PostgreSQL password has been set."
+
+msg_step "8" "${TOTAL_STEPS}" "Generating and encrypting variables..."
 
 msg_info "Generating bcrypt hash for the admin password..."
 HASHED_PASS=$(htpasswd -nbB -C 10 "$ADMIN_USER" "$ADMIN_PASS" | cut -d':' -f2)
@@ -209,6 +241,7 @@ restic_password: "$RESTIC_PASS"
 ansible_controller_ip: "$ANSIBLE_CONTROLLER_IP"
 homelab_email_user: "$GITLAB_EMAIL"
 homelab_email_token: "$GITLAB_TOKEN"
+postgres_admin_password: "$POSTGRES_PASS"
 EOF
 )
 

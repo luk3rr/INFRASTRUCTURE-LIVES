@@ -1,0 +1,54 @@
+- name: PostgreSQL | Install PostgreSQL and dependencies
+  ansible.builtin.apt:
+    name:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-contrib-{{ postgres_version }}"
+      - python3-psycopg2
+      - sudo
+    state: present
+    update_cache: yes
+
+- name: PostgreSQL | Configure PostgreSQL to listen on all interfaces
+  ansible.builtin.lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: "^#?listen_addresses"
+    line: "listen_addresses = '*'"
+  notify: Restart PostgreSQL
+
+- name: PostgreSQL | Configure access for the local network
+  ansible.builtin.template:
+    src: pg_hba.conf.j2
+    dest: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    owner: postgres
+    group: postgres
+    mode: '0640'
+  notify: Restart PostgreSQL
+
+- name: PostgreSQL | Create application users
+  community.postgresql.postgresql_user:
+    name: "{{ item.name }}"
+    password: "{{ item.password }}"
+    role_attr_flags: "{{ item.privileges | default('LOGIN') }}"
+  become: yes
+  become_user: postgres
+  loop:
+    - name: "admin"
+      password: "{{ postgres_admin_password }}"
+      privileges: "SUPERUSER,LOGIN"
+    - name: "{{ default_admin_user }}"
+      password: "{{ admin_pass }}"
+      privileges: "SUPERUSER,LOGIN"
+  no_log: true
+
+- name: PostgreSQL | Create a dedicated database for Nginx Proxy Manager
+  community.postgresql.postgresql_db:
+    name: "npm"
+    owner: "{{ default_admin_user }}"
+  become: yes
+  become_user: postgres
+
+- name: PostgreSQL | Ensure the PostgreSQL service is running
+  ansible.builtin.service:
+    name: postgresql
+    state: started
+    enabled: yes
