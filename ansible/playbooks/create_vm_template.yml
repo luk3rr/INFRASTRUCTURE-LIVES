@@ -14,6 +14,7 @@
     vm_sockets: 1
     vm_memory: 2048
     vm_disk_size: "32G"
+    swap_size: "4G"
 
   tasks:
     - name: Check for existing template
@@ -40,7 +41,13 @@
 
     - name: Customize image (inject qemu-guest-agent)
       ansible.builtin.command:
-        cmd: "virt-customize --add {{ image_path }} --install qemu-guest-agent"
+        cmd: >
+          virt-customize -a {{ image_path }}
+          --install qemu-guest-agent
+          --run-command 'fallocate -l {{ swap_size }} /swapfile'
+          --run-command 'chmod 600 /swapfile'
+          --run-command 'mkswap /swapfile'
+          --run-command "echo '/swapfile none swap sw 0 0' >> /etc/fstab"
 
     - name: Create and configure the VM template using qm commands
       ansible.builtin.shell: |

@@ -56,51 +56,89 @@ check_and_set_secret() {
   fi
 }
 
-msg_title "Service Installation Orchestrator"
-PS3="Choose an installation option: "
+run_k8s_secret_creation() {
+  msg_alert "This script will create the GitLab registry secret in Kubernetes."
+  read -p "Enter the email for the registry secret: " REGISTRY_EMAIL
+  read -p "Enter a comma-separated list of namespaces (e.g., hotela,p2p-chat): " NAMESPACE_LIST
+  check_and_set_secret "gitlab_deploy_token" "Please enter your GitLab Deploy Token"
+  msg_info "Running the Ansible playbook..."
+  ansible-playbook "${PLAYBOOKS_DIR}/k8s-gitlab-registry-secret.yml" \
+    -e "target_namespaces_str=${NAMESPACE_LIST}" \
+    -e "registry_email=${REGISTRY_EMAIL}" \
+    --vault-password-file <(printf "%s" "$VAULT_PASS")
+  msg_succ "Operation completed successfully!"
+}
 
-options=("Install a Specific Service" "Exit")
+show_install_menu() {
+  PS3="Choose an installation option: "
 
-select opt in "${options[@]}"; do
-  case $opt in
-    "Install a Specific Service")
-      msg_alert "Select the service you want to install:"
+  options=("Install a Specific Service" "Exit")
 
-      service_names=()
-      for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-        service_names+=("$(echo "$entry" | cut -d':' -f1)")
-      done
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Install a Specific Service")
+        msg_alert "Select the service you want to install:"
 
-      select target_service in "${service_names[@]}"; do
-        if [[ -n "$target_service" ]]; then
-          for entry in "${SERVICE_PLAYBOOKS[@]}"; do
-            name=$(echo "$entry" | cut -d':' -f1)
-            params=$(echo "$entry" | cut -d':' -f2)
-            secret_key=$(echo "$entry" | cut -d':' -f3)
+        service_names=()
+        for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+          service_names+=("$(echo "$entry" | cut -d':' -f1)")
+        done
 
-            if [[ "$name" == "$target_service" ]]; then
-              CMD="ansible-playbook ${PLAYBOOKS_DIR}/${name}.yml"
+        select target_service in "${service_names[@]}"; do
+          if [[ -n "$target_service" ]]; then
+            for entry in "${SERVICE_PLAYBOOKS[@]}"; do
+              name=$(echo "$entry" | cut -d':' -f1)
+              params=$(echo "$entry" | cut -d':' -f2)
+              secret_key=$(echo "$entry" | cut -d':' -f3)
 
-              if [[ "$params" == "--ask-vault-pass" ]]; then
-                if [[ -n "$secret_key" ]]; then
-                  check_and_set_secret "$secret_key" "Please, enter the value for '${secret_key}'"
-                elif [[ -z "$VAULT_PASS" ]]; then
-                   read -sp "Enter Ansible Vault password: " VAULT_PASS
-                   echo
+              if [[ "$name" == "$target_service" ]]; then
+                CMD="ansible-playbook ${PLAYBOOKS_DIR}/${name}.yml"
+
+                if [[ "$params" == "--ask-vault-pass" ]]; then
+                  if [[ -n "$secret_key" ]]; then
+                    check_and_set_secret "$secret_key" "Please, enter the value for '${secret_key}'"
+                  elif [[ -z "$VAULT_PASS" ]]; then
+                     read -sp "Enter Ansible Vault password: " VAULT_PASS
+                     echo
+                  fi
+                  CMD+=" --vault-password-file <(printf \"%s\" \"$VAULT_PASS\")"
                 fi
-                CMD+=" --vault-password-file <(printf \"%s\" \"$VAULT_PASS\")"
-              fi
 
-              msg_info "Starting installation of '${name}'..."
-              eval "$CMD"
-              msg_succ "Installation of '${name}' completed."
-              break
-            fi
-          done
-        else
-          msg_error "Invalid selection."
-        fi
-      done
+                msg_info "Starting installation of '${name}'..."
+                eval "$CMD"
+                msg_succ "Installation of '${name}' completed."
+                break
+              fi
+            done
+          else
+            msg_error "Invalid selection."
+          fi
+          break
+        done
+        break
+        ;;
+      "Exit")
+        break
+        ;;
+      *)
+        msg_error "Invalid option: $REPLY"
+        ;;
+    esac
+  done
+}
+
+msg_title "Ansible Homelab Orchestrator"
+PS3="Choose an operation area (enter the number): "
+main_options=("Install Services" "Manage Kubernetes Secrets" "Exit")
+
+select opt in "${main_options[@]}"; do
+  case $opt in
+    "Install Services")
+      show_install_menu
+      break
+      ;;
+    "Manage Kubernetes Secrets")
+      run_k8s_secret_creation
       break
       ;;
     "Exit")

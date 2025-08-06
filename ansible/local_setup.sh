@@ -28,6 +28,7 @@ if ! command -v ansible &> /dev/null; then
     sudo apt-get install software-properties-common -y
     sudo add-apt-repository --yes --update ppa:ansible/ansible
     sudo apt-get install ansible -y
+    sudo apt-get install python3-kubernetes -y
 
     ansible-galaxy collection install -r requirements.yml -p ./collections
     msg_succ "Ansible installed successfully."

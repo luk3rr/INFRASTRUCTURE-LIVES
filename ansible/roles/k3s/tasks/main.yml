@@ -34,6 +34,20 @@
   args:
     creates: /usr/local/bin/k3s
 
+- name: K3s | Copy config template
+  ansible.builtin.template:
+    src: config.yaml.j2
+    dest: /etc/rancher/k3s/config.yaml
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: K3s | Restart K3s service to apply configuration
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+    enabled: yes
+
 - name: K3s | 3. Configure kubeconfig for the local user
   block:
     - name: Ensure .kube directory exists
