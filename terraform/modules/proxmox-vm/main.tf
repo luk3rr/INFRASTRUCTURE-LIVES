@@ -14,13 +14,18 @@ resource "proxmox_vm_qemu" "vm" {
   }
 
   disk {
+    backup  = true
+    format  = "raw"
     size    = "${var.disk_size}G"
     storage = var.disk_storage
     type    = "disk"
     slot    = "scsi0"
+    discard = true
   }
 
   disk {
+    backup  = true
+    format  = "raw"
     type    = "cloudinit"
     storage = var.disk_storage
     slot    = "ide2"

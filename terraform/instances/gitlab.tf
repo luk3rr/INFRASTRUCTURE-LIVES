@@ -12,6 +12,6 @@ module "gitlab" {
   ssh_public_key = var.ssh_public_key
 
   cpu_cores = 4
-  memory    = 12288
-  disk_size = 64
+  memory    = 16368
+  disk_size = 128
 }
