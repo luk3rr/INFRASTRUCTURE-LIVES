@@ -30,3 +30,45 @@
           - "Setup complete! Your kubectl is now configured."
           - "To see all available cluster contexts, run: kubectl config get-contexts"
           - "To switch to the new K3s cluster, run: kubectl config use-context default"
+
+- name: Patch CoreDNS configmap to include luk3rr.com domain
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars:
+    local_domain: "luk3rr.com"
+    local_dns_server: "192.168.1.102"
+  tasks:
+    - name: Get existing Corefile from CoreDNS configmap
+      ansible.builtin.command: kubectl -n kube-system get configmap coredns -o json
+      register: coredns_configmap
+
+    - name: Modify Corefile to include luk3rr.com block
+      ansible.builtin.set_fact:
+        new_corefile: |
+          {{ coredns_configmap.stdout | from_json | json_query('data.Corefile') }}
+          {{ local_domain }}:53 {
+              errors
+              cache 30
+              forward . {{ local_dns_server }}
+          }
+
+    - name: Patch CoreDNS configmap with modified Corefile
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: coredns
+            namespace: kube-system
+          data:
+            Corefile: "{{ new_corefile }}"
+
+- name: Restart CoreDNS to apply new configuration
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  tasks:
+    - name: Restart CoreDNS deployment
+      ansible.builtin.command: kubectl -n kube-system rollout restart deployment coredns

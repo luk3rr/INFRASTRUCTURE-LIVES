@@ -10,6 +10,7 @@ source "$BASH_BEAUTIFUL"
 
 PLAYBOOKS_DIR="playbooks"
 SECRETS_FILE="group_vars/secrets.yml"
+export ANSIBLE_COLLECTIONS_PATH="./collections"
 
 # Service : Parameters
 SERVICE_PLAYBOOKS=(
@@ -56,17 +57,82 @@ check_and_set_secret() {
   fi
 }
 
-run_k8s_secret_creation() {
+k8s_gitlab_integration() {
   msg_alert "This script will create the GitLab registry secret in Kubernetes."
   read -p "Enter the email for the registry secret: " REGISTRY_EMAIL
   read -p "Enter a comma-separated list of namespaces (e.g., hotela,p2p-chat): " NAMESPACE_LIST
   check_and_set_secret "gitlab_deploy_token" "Please enter your GitLab Deploy Token"
   msg_info "Running the Ansible playbook..."
-  ansible-playbook "${PLAYBOOKS_DIR}/k8s-gitlab-registry-secret.yml" \
+  ansible-playbook "${PLAYBOOKS_DIR}/gitlab-k8s-integration.yml" \
     -e "target_namespaces_str=${NAMESPACE_LIST}" \
     -e "registry_email=${REGISTRY_EMAIL}" \
     --vault-password-file <(printf "%s" "$VAULT_PASS")
   msg_succ "Operation completed successfully!"
+}
+
+k8s_vault_integration() {
+  msg_alert "This will configure the integration between Vault, PostgreSQL, and Kubernetes."
+  msg_info "The script will use the 'apps' list defined inside the playbook."
+  read -p "Do you want to proceed? (y/n): " confirm
+  if [[ "$confirm" =~ ^[Yy]$ ]]; then
+    check_and_set_secret "vault_root_token" "Please enter your Vault Root Token"
+    msg_info "Running the Vault-Postgres integration playbook..."
+    ansible-playbook "${PLAYBOOKS_DIR}/vault-postgres-k8s-integration.yml" \
+      --ask-become-pass \
+      --vault-password-file <(printf "%s" "$VAULT_PASS")
+    msg_succ "Integration playbook completed successfully."
+  else
+    msg_error "Operation cancelled."
+  fi
+}
+
+k8s_app_secret_creation() {
+  msg_alert "This will create/update a KV secret for a specific application in Vault."
+  msg_info "Secrets are defined in the file './app_secrets/<app_name>.yml'. Ensure this file exists before proceeding."
+
+  read -p "Enter the application name (e.g., hotela): " APP_NAME
+
+  local SECRETS_FILE_PATH="app_secrets/${APP_NAME}.yml"
+
+  if [ ! -f "$SECRETS_FILE_PATH" ]; then
+    msg_error "Error: File not found at '${SECRETS_FILE_PATH}'."
+    exit 1
+  fi
+
+  check_and_set_secret "vault_root_token" "Please enter your Vault Root Token"
+
+  msg_info "Running playbook to write secrets for '${APP_NAME}'..."
+
+  ansible-playbook "${PLAYBOOKS_DIR}/vault-create-secrets.yml" \
+    -e "app_name=${APP_NAME}" \
+    -e "secrets_file_path=${SECRETS_FILE_PATH}" \
+    --vault-password-file <(printf "%s" "$VAULT_PASS")
+
+  msg_succ "Secrets for '${APP_NAME}' have been successfully written to Vault."
+}
+
+show_k8s_menu() {
+  PS3="Choose an option: "
+  options=("Setup Gitlab Registry + k8s" "Setup Vault + k8s + PostgreSQL" "Exit")
+
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Setup Gitlab Registry + k8s")
+        k8s_gitlab_integration
+        break
+        ;;
+      "Setup Vault + k8s + PostgreSQL")
+        k8s_vault_integration
+        break
+        ;;
+      "Exit")
+        break
+        ;;
+      *)
+        msg_error "Invalid option: $REPLY"
+        ;;
+    esac
+  done
 }
 
 show_install_menu() {
@@ -127,9 +193,29 @@ show_install_menu() {
   done
 }
 
+show_vault_menu() {
+  PS3="Choose an option: "
+  options=("Create/Update App Secret" "Exit")
+
+  select opt in "${options[@]}"; do
+    case $opt in
+      "Create/Update App Secret")
+        k8s_app_secret_creation
+        break
+        ;;
+      "Exit")
+        break
+        ;;
+      *)
+        msg_error "Invalid option: $REPLY"
+        ;;
+    esac
+  done
+}
+
 msg_title "Ansible Homelab Orchestrator"
 PS3="Choose an operation area (enter the number): "
-main_options=("Install Services" "Manage Kubernetes Secrets" "Exit")
+main_options=("Install Services" "Manage Kubernetes" "Manage Vault Secrets" "Exit")
 
 select opt in "${main_options[@]}"; do
   case $opt in
@@ -137,8 +223,12 @@ select opt in "${main_options[@]}"; do
       show_install_menu
       break
       ;;
-    "Manage Kubernetes Secrets")
-      run_k8s_secret_creation
+    "Manage Kubernetes")
+      show_k8s_menu
+      break
+      ;;
+    "Manage Vault Secrets")
+      show_vault_menu
       break
       ;;
     "Exit")

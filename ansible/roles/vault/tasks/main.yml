@@ -25,7 +25,7 @@
   ansible.builtin.apt:
     name: vault
     state: present
-    update_cache: yes # Ensures the new repository is read
+    update_cache: yes
 
 - name: Vault | 4. Create Vault user and directories
   block:

@@ -24,28 +24,19 @@
     mode: '0640'
   notify: Restart PostgreSQL
 
-- name: PostgreSQL | Create application users
+- name: PostgreSQL | Create users
   community.postgresql.postgresql_user:
     name: "{{ item.name }}"
     password: "{{ item.password }}"
-    role_attr_flags: "{{ item.privileges | default('LOGIN') }}"
+    role_attr_flags: "SUPERUSER,LOGIN"
   become: yes
   become_user: postgres
   loop:
     - name: "admin"
       password: "{{ postgres_admin_password }}"
-      privileges: "SUPERUSER,LOGIN"
     - name: "{{ default_admin_user }}"
       password: "{{ admin_pass }}"
-      privileges: "SUPERUSER,LOGIN"
   no_log: true
-
-- name: PostgreSQL | Create a dedicated database for Nginx Proxy Manager
-  community.postgresql.postgresql_db:
-    name: "npm"
-    owner: "{{ default_admin_user }}"
-  become: yes
-  become_user: postgres
 
 - name: PostgreSQL | Ensure the PostgreSQL service is running
   ansible.builtin.service:

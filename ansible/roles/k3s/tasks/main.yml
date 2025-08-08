@@ -28,19 +28,49 @@
         - net.bridge.bridge-nf-call-iptables
         - net.ipv4.ip_forward
 
+    - name: Disable IPv6 immediately
+      ansible.posix.sysctl:
+        name: "{{ item }}"
+        value: '1'
+        sysctl_set: yes
+        state: present
+        reload: yes
+      loop:
+        - net.ipv6.conf.all.disable_ipv6
+        - net.ipv6.conf.default.disable_ipv6
+
+    - name: Persist disable IPv6 on reboot in sysctl.conf
+      ansible.builtin.lineinfile:
+        path: /etc/sysctl.conf
+        regexp: "^{{ item }}="
+        line: "{{ item }}=1"
+        create: yes
+      loop:
+        - net.ipv6.conf.all.disable_ipv6
+        - net.ipv6.conf.default.disable_ipv6
+
 - name: K3s | 2. Install K3s server
   ansible.builtin.shell:
     cmd: curl -sfL https://get.k3s.io | sh -
   args:
     creates: /usr/local/bin/k3s
 
-- name: K3s | Copy config template
-  ansible.builtin.template:
-    src: config.yaml.j2
-    dest: /etc/rancher/k3s/config.yaml
-    owner: root
-    group: root
-    mode: '0644'
+- name: K3s | Create config directory and copy custom config template
+  vars:
+    dns_server: "192.168.1.102"
+  block:
+    - name: Ensure K3s config directory exists
+      ansible.builtin.file:
+        path: /etc/rancher/k3s
+        state: directory
+        mode: '0755'
+    - name: Copy K3s config file with custom DNS
+      ansible.builtin.template:
+        src: config.yaml.j2
+        dest: /etc/rancher/k3s/config.yaml
+        owner: root
+        group: root
+        mode: '0644'
 
 - name: K3s | Restart K3s service to apply configuration
   ansible.builtin.systemd:

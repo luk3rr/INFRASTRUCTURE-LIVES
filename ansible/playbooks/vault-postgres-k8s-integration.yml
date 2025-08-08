@@ -1,0 +1,202 @@
+- name: Configure PostgreSQL, Vault, and Kubernetes for Multiple Applications
+  hosts: localhost
+  connection: local
+  gather_facts: no
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  vars:
+    apps:
+      - name: "hotela"
+        namespace: "hotela"
+    vault_account_service_name: "vault-auth"
+
+  tasks:
+    - name: Ensure python dependency is installed on postgres host
+      become: true
+      ansible.builtin.apt:
+        name: python3-psycopg2
+        state: present
+      delegate_to: "{{ hostvars['postgres'].inventory_hostname }}"
+
+    - name: "Ensure a dedicated database exists for each app"
+      delegate_to: "{{ hostvars['postgres'].inventory_hostname }}"
+      become: yes
+      become_user: postgres
+      community.postgresql.postgresql_db:
+        login_host: "{{ hostvars['postgres'].ansible_host }}"
+        login_user: "admin"
+        login_password: "{{ postgres_admin_password }}"
+        name: "{{ item.name }}"
+        owner: "admin"
+        state: present
+      loop: "{{ apps }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "For each app, ensure schema and admin role exist in PostgreSQL"
+      delegate_to: "{{ hostvars['postgres'].inventory_hostname }}"
+      become: yes
+      become_user: postgres
+      community.postgresql.postgresql_query:
+        login_host: "{{ hostvars['postgres'].ansible_host }}"
+        login_user: "admin"
+        login_password: "{{ postgres_admin_password }}"
+        login_db: "{{ item.name }}"
+        query: |
+          CREATE SCHEMA IF NOT EXISTS "{{ item.name }}";
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{{ item.name }}_admins') THEN
+              CREATE ROLE "{{ item.name }}_admins" NOLOGIN;
+            END IF;
+          END
+          $$;
+          GRANT ALL ON SCHEMA "{{ item.name }}" TO "{{ item.name }}_admins";
+      loop: "{{ apps }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Gather Kubernetes cluster CA certificate
+      kubernetes.core.k8s_info:
+        kind: ConfigMap
+        name: kube-root-ca.crt
+        namespace: kube-system
+      register: k8s_ca
+
+    - name: Configure Vault's Secrets Engines and Auth Methods
+      delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+      environment:
+        VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+      run_once: true
+      block:
+        - name: "Check if Database Secrets Engine is already enabled"
+          delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+          environment:
+            VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+            VAULT_TOKEN: "{{ vault_root_token }}"
+          community.hashi_vault.vault_read:
+            path: "sys/mounts/database"
+          register: db_engine_status
+          failed_when: false
+          changed_when: false
+          run_once: true
+
+        - name: "Enable Database Secrets Engine if not present"
+          delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+          environment:
+            VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+            VAULT_TOKEN: "{{ vault_root_token }}"
+          community.hashi_vault.vault_write:
+            path: "sys/mounts/database"
+            data:
+              type: "database"
+          run_once: true
+          when: db_engine_status.failed
+
+        - name: "Configure PostgreSQL connection for Vault"
+          community.hashi_vault.vault_write:
+            path: database/config/postgres
+            data:
+              plugin_name: postgresql-database-plugin
+              allowed_roles: "app-*"
+              connection_url: "postgresql://admin:{{ postgres_admin_password }}@{{ hostvars['postgres'].ansible_host }}:5432/postgres?sslmode=disable"
+
+        - name: "Check if Kubernetes Auth Method is enabled"
+          community.hashi_vault.vault_read:
+            path: "sys/auth/kubernetes"
+          register: k8s_auth_status
+          failed_when: false
+          changed_when: false
+
+        - name: "Enable Kubernetes Auth Method if not present"
+          community.hashi_vault.vault_write:
+            path: "sys/auth/kubernetes"
+            data:
+              type: "kubernetes"
+          when: k8s_auth_status.failed
+
+        - name: "Configure Kubernetes Auth Method"
+          community.hashi_vault.vault_write:
+            path: auth/kubernetes/config
+            data:
+              kubernetes_host: "https://{{ hostvars['k8s-node'].ansible_host }}:6443"
+              kubernetes_ca_cert: "{{ k8s_ca.resources[0].data['ca.crt'] }}"
+
+    - name: "Create Vault dynamic DB role for each app"
+      delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+      environment:
+        VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+      community.hashi_vault.vault_write:
+        path: "database/roles/app-{{ item.name }}"
+        data:
+          db_name: postgres
+          creation_statements: "{% raw %}CREATE ROLE \"{{name}}\" WITH LOGIN PASSWORD '{{password}}' VALID UNTIL '{{expiration}}';{% endraw %} GRANT {{ item.name }}_admins TO {% raw %}\"{{name}}\";{% endraw %}"
+          default_ttl: "1h"
+          max_ttl: "24h"
+      loop: "{{ apps }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "Create Vault policy for each app"
+      delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+      environment:
+        VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+      community.hashi_vault.vault_write:
+        path: "sys/policy/app-{{ item.name }}-policy"
+        data:
+          policy: |
+            path "database/creds/app-{{ item.name }}" { capabilities = ["read"] }
+            path "kv/data/app/{{ item.name }}" { capabilities = ["read"] }
+      loop: "{{ apps }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "Create Vault K8s auth role for each app"
+      delegate_to: "{{ hostvars['vault'].inventory_hostname }}"
+      environment:
+        VAULT_ADDR: "http://{{ hostvars['vault'].ansible_host }}:8200"
+        VAULT_TOKEN: "{{ vault_root_token }}"
+
+      community.hashi_vault.vault_write:
+        path: "auth/kubernetes/role/app-{{ item.name }}"
+        data:
+          bound_service_account_names:
+            - "{{ vault_account_service_name }}"
+          bound_service_account_namespaces:
+            - "{{ item.namespace }}"
+          policies:
+            - "app-{{ item.name }}-policy"
+          ttl: "24h"
+
+      loop: "{{ apps }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Create Service and Endpoint for external PostgreSQL
+      kubernetes.core.k8s:
+        state: present
+        definition: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: postgres-external
+            namespace: default
+          spec:
+            ports:
+            - port: 5432
+          ---
+          apiVersion: v1
+          kind: Endpoints
+          metadata:
+            name: postgres-external
+            namespace: default
+          subsets:
+          - addresses:
+            - ip: "{{ hostvars['postgres'].ansible_host }}"
+            ports:
+            - port: 5432

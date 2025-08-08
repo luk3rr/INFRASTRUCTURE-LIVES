@@ -2,6 +2,7 @@
 
 # Ansible
 **/group_vars/
+**/app_secrets/
 **/secrets.yml
 **/fetched*
 **/collections*
