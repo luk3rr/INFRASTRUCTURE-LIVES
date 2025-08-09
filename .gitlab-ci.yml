@@ -103,7 +103,7 @@ config_metallb:
     - when: manual
 
 deploy_vault_agent_injector:
-  stage: setup
+  stage: applications
   needs:
       - job: config_service_accounts
   image:
