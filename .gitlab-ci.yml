@@ -24,7 +24,7 @@ cache:
 
 stages:
   - setup
-  - destroy
+  - applications
 
 config_service_accounts:
   stage: setup
@@ -100,6 +100,8 @@ config_metallb:
 
 deploy_vault_agent_injector:
   stage: setup
+  needs:
+      - job: config_service_accounts
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
@@ -130,9 +132,9 @@ deploy_vault_agent_injector:
     - when: manual
 
 deploy_excalidraw:
-  stage: setup
+  stage: applications
   needs:
-    - job: config_service_accounts
+    - job: config_metallb
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
@@ -154,9 +156,9 @@ deploy_excalidraw:
     - when: manual
 
 deploy_chartdb:
-  stage: setup
+  stage: applications
   needs:
-    - job: config_service_accounts
+    - job: config_metallb
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
@@ -167,12 +169,12 @@ deploy_chartdb:
     - export KUBECONFIG=$PWD/kubeconfig
   script:
     - |
-        if ! kubectl get namespace $CHARTDB_NAMESPACE > /dev/null 2>&1; then
-            echo "Namespace $CHARTDB_NAMESPACE does not exist. Creating it."
-            kubectl create namespace $CHARTDB_NAMESPACE
-        fi
-      - kubectl apply -f $CHARTDB_DEPLOY_MANIFEST -n $CHARTDB_NAMESPACE
-      - echo "Waiting for Excalidraw deployment to be ready..."
-      - kubectl rollout status deployment/$SERVICE_NAME -n "$CHARTDB_NAMESPACE" --timeout=120s
+      if ! kubectl get namespace $CHARTDB_NAMESPACE > /dev/null 2>&1; then
+          echo "Namespace $CHARTDB_NAMESPACE does not exist. Creating it."
+          kubectl create namespace $CHARTDB_NAMESPACE
+      fi
+    - kubectl apply -f $CHARTDB_DEPLOY_MANIFEST -n $CHARTDB_NAMESPACE
+    - echo "Waiting for Excalidraw deployment to be ready..."
+    - kubectl rollout status deployment/$SERVICE_NAME -n "$CHARTDB_NAMESPACE" --timeout=120s
   rules:
     - when: manual
