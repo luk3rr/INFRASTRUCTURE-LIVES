@@ -1,0 +1,9 @@
+sonar.jdbc.username={{ sonarqube_db_user }}
+sonar.jdbc.password={{ sonarqube_db_password }}
+sonar.jdbc.url=jdbc:postgresql://{{ hostvars['postgres'].ansible_host }}/sonarqube
+
+sonar.web.host=0.0.0.0
+sonar.web.port=9000
+
+sonar.web.javaOpts=-Xmx1G -Xms512m -XX:+HeapDumpOnOutOfMemoryError
+sonar.search.javaOpts=-Xmx1G -Xms1G -XX:+HeapDumpOnOutOfMemoryError

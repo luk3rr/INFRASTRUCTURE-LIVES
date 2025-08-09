@@ -1,0 +1,105 @@
+- name: SonarQube | Install Dependencies
+  ansible.builtin.apt:
+    name: ['unzip', 'openjdk-17-jdk']
+    state: present
+    update_cache: yes
+
+- name: SonarQube | Create SonarQube user and group
+  ansible.builtin.user:
+    name: sonarqube
+    system: yes
+    shell: /bin/false
+
+- name: SonarQube | Download and unarchive SonarQube
+  ansible.builtin.unarchive:
+    src: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonarqube_version }}.zip"
+    dest: /opt/
+    remote_src: yes
+    owner: sonarqube
+    group: sonarqube
+    creates: "/opt/sonarqube-{{ sonarqube_version }}/bin/linux-x86-64/sonar.sh"
+
+- name: SonarQube | Create a symlink to the current version
+  ansible.builtin.file:
+    src: "/opt/sonarqube-{{ sonarqube_version }}"
+    dest: /opt/sonarqube
+    state: link
+    owner: sonarqube
+    group: sonarqube
+
+- name: SonarQube | Setup database
+  delegate_to: "{{ hostvars['postgres'].inventory_hostname }}"
+  become: yes
+  become_user: postgres
+  block:
+    - name: SonarQune | Ensure python dependency is installed on postgres host
+      become: true
+      ansible.builtin.apt:
+        name: python3-psycopg2
+        state: present
+
+    - name: Create the SonarQube database user
+      community.postgresql.postgresql_user:
+        login_host: "{{ hostvars['postgres'].ansible_host }}"
+        login_db: postgres
+        login_user: "admin"
+        login_password: "{{ postgres_admin_password }}"
+        name: "{{ sonarqube_db_user }}"
+        password: "{{ sonarqube_db_password }}"
+        role_attr_flags: "LOGIN"
+      no_log: true
+
+    - name: Create the SonarQube database
+      community.postgresql.postgresql_db:
+        login_host: "{{ hostvars['postgres'].ansible_host }}"
+        maintenance_db: postgres
+        login_user: "admin"
+        login_password: "{{ postgres_admin_password }}"
+        name: "sonarqube"
+        owner: "{{ sonarqube_db_user }}"
+        encoding: 'UTF-8'
+        template: 'template0'
+
+    - name: Grant all privileges on the database to the SonarQube user
+      community.postgresql.postgresql_query:
+        login_db: sonarqube
+        login_host: "{{ hostvars['postgres'].ansible_host }}"
+        login_user: "admin"
+        login_password: "{{ postgres_admin_password }}"
+        query: "GRANT ALL PRIVILEGES ON DATABASE sonarqube TO {{ sonarqube_db_user }};"
+
+- name: SonarQube | Configure database connection
+  ansible.builtin.template:
+    src: sonar.properties.j2
+    dest: /opt/sonarqube/conf/sonar.properties
+    owner: sonarqube
+    group: sonarqube
+    mode: '0600'
+  notify: Restart SonarQube
+
+- name: SonarQube | Set ownership on SonarQube directory
+  ansible.builtin.file:
+    path: "/opt/sonarqube-{{ sonarqube_version }}"
+    owner: sonarqube
+    group: sonarqube
+    recurse: yes
+
+- name: SonarQube | Set permissions on temp directory
+  ansible.builtin.file:
+    path: "/opt/sonarqube-{{ sonarqube_version }}/temp"
+    mode: u+rwX
+    recurse: yes
+
+- name: SonarQube | Create systemd service file
+  ansible.builtin.template:
+    src: sonarqube.service.j2
+    dest: /etc/systemd/system/sonarqube.service
+    mode: '0644'
+  notify: Restart SonarQube
+
+- name: SonarQube | Enable and start the SonarQube service
+  ansible.builtin.systemd:
+    name: sonarqube
+    state: started
+    enabled: yes
+    daemon_reload: yes

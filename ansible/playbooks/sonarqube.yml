@@ -1,0 +1,9 @@
+- name: Deploy SonarQube
+  hosts: sonarqube
+  become: yes
+  vars:
+    sonarqube_version: "25.8.0.112029"
+  vars_files:
+    - ../group_vars/secrets.yml
+  roles:
+    - sonarqube

@@ -1,0 +1,21 @@
+---
+- name: Perform Initial Setup and Hardening on Proxmox VE Hosts
+  hosts: proxmox_hosts
+  become: yes
+  gather_facts: no
+  roles:
+    - proxmox
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  pre_tasks:
+    - name: Ensure lsb-release is installed
+      ansible.builtin.apt:
+        name: lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Gather facts after installing lsb-release
+      ansible.builtin.setup:
+        filter: ansible_lsb

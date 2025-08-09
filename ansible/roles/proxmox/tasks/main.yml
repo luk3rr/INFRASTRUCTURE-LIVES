@@ -1,0 +1,69 @@
+- name: Disable the PVE Enterprise APT Repository
+  ansible.builtin.lineinfile:
+    path: /etc/apt/sources.list.d/pve-enterprise.list
+    regexp: '^deb https://enterprise.proxmox.com/debian/pve'
+    line: '# deb https://enterprise.proxmox.com/debian/pve {{ ansible_lsb.codename }} pve-enterprise'
+    state: present
+  tags: apt
+
+- name: Add the PVE No-Subscription APT Repository
+  ansible.builtin.template:
+    src: pve-no-subscription.list.j2
+    dest: /etc/apt/sources.list.d/pve-no-subscription.list
+    mode: '0644'
+
+- name: Update APT cache to apply repository changes
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  tags: apt
+
+- name: Install common useful and hardening packages
+  ansible.builtin.apt:
+    name:
+      - htop
+      - ncdu
+      - git
+      - vim
+      - smartmontools
+      - lm-sensors
+      - unattended-upgrades
+    state: present
+  tags: packages
+
+- name: Configure required kernel parameters for containers (e.g., SonarQube)
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_set: yes
+    state: present
+    reload: yes
+  loop:
+    - { key: 'vm.max_map_count', value: '262144' }
+    - { key: 'fs.file-max', value: '65536' }
+  tags: kernel
+
+- name: Configure unattended-upgrades for security updates
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+    mode: '0644'
+  tags: security
+
+- name: Configure smartd to monitor all disks and send alerts
+  ansible.builtin.lineinfile:
+    path: /etc/smartd.conf
+    regexp: '^DEVICESCAN'
+    line: 'DEVICESCAN -a -m {{ proxmox_admin_email }} -M exec /usr/share/smartmontools/smartd-runner'
+    state: present
+  notify: Restart smartd
+  tags: monitoring
+
+- name: Ensure smartd service is running and enabled
+  ansible.builtin.service:
+    name: smartd
+    state: started
+    enabled: yes
+  tags: monitoring
