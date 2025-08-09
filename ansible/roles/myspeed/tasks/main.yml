@@ -1,0 +1,84 @@
+- name: MySpeed | Install Dependencies
+  block:
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name: ['curl', 'unzip', 'nodejs', 'sudo']
+        state: present
+        update_cache: yes
+
+    - name: Get Node.js setup script (v18)
+      ansible.builtin.get_url:
+        url: https://deb.nodesource.com/setup_18.x
+        dest: /tmp/nodesource_setup.sh
+        mode: '0755'
+
+    - name: Run Node.js setup script
+      ansible.builtin.command:
+        cmd: /tmp/nodesource_setup.sh
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js
+      ansible.builtin.apt:
+        name: nodejs
+        state: present
+
+- name: MySpeed | Create a dedicated user for MySpeed
+  ansible.builtin.user:
+    name: myspeed
+    system: yes
+    shell: /bin/false
+
+- name: MySpeed | Create application directory
+  ansible.builtin.file:
+    path: /opt/myspeed
+    state: directory
+    owner: myspeed
+    group: myspeed
+    mode: '0755'
+
+- name: MySpeed | Download and Install MySpeed
+  block:
+    - name: Get latest release URL from GitHub API
+      ansible.builtin.uri:
+        url: "https://api.github.com/repos/gnmyt/myspeed/releases/latest"
+        return_content: yes
+      register: myspeed_release
+      check_mode: no
+
+    - name: Download and unarchive to a temporary directory
+      ansible.builtin.unarchive:
+        src: "{{ myspeed_release.json.assets[0].browser_download_url }}"
+        dest: /tmp/
+        remote_src: yes
+      register: unarchive_result
+
+    - name: Move files from temp dir to final destination
+      ansible.builtin.copy:
+        src: "{{ unarchive_result.dest }}/"
+        dest: /opt/myspeed/
+        remote_src: yes
+        owner: myspeed
+        group: myspeed
+      when: unarchive_result.changed
+
+    - name: Install npm dependencies
+      community.general.npm:
+        path: /opt/myspeed
+        state: present
+      become_user: myspeed
+
+- name: MySpeed | Setup and start the systemd service
+  block:
+    - name: Create systemd service file
+      ansible.builtin.template:
+        src: myspeed.service.j2
+        dest: /etc/systemd/system/myspeed.service
+        mode: '0644'
+      notify: Restart MySpeed
+
+    - name: Enable and start the MySpeed service
+      ansible.builtin.systemd:
+        name: myspeed
+        state: started
+        enabled: yes
+        daemon_reload: yes

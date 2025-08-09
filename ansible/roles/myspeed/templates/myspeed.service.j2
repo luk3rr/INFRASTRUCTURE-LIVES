@@ -1,0 +1,15 @@
+[Unit]
+Description=MySpeed - Speedtest Server
+After=network.target
+
+[Service]
+Type=simple
+User=myspeed
+Group=myspeed
+WorkingDirectory=/opt/myspeed
+ExecStart=/usr/bin/node server
+Environment=NODE_ENV=production
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

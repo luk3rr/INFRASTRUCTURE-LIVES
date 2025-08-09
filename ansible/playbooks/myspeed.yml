@@ -1,0 +1,6 @@
+- name: Deploy MySpeed
+  hosts: myspeed
+  become: yes
+  gather_facts: yes
+  roles:
+    - myspeed

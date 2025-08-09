@@ -1,0 +1,4 @@
+- name: Restart MySpeed
+  ansible.builtin.service:
+    name: myspeed
+    state: restarted

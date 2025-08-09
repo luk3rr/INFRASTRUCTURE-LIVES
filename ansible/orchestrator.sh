@@ -24,6 +24,7 @@ SERVICES_PLAYBOOKS=(
   "Gitlab CE:gitlab:--ask-vault-pass:"
   "Gitlab Runner:gitlab-runner:--ask-vault-pass:gitlab_runner_token"
   "SonarQube:sonarqube:--ask-vault-pass:sonarqube_db_user,sonarqube_db_password"
+  "My Speed:myspeed::"
 )
 
 PROXMOX_PLAYBOOKS=(
@@ -176,7 +177,7 @@ show_install_update_menu() {
   select opt in "${options[@]}"; do
     case $opt in
       "Install/Update a Specific Service")
-        msg_alert "Select the service you want to install:"
+        msg_alert "Select the service you want to install/update:"
 
         service_names=()
         for entry in "${SERVICES_PLAYBOOKS[@]}"; do
