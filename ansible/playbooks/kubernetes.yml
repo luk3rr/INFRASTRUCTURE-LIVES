@@ -31,29 +31,31 @@
           - "To see all available cluster contexts, run: kubectl config get-contexts"
           - "To switch to the new K3s cluster, run: kubectl config use-context default"
 
-- name: Patch CoreDNS configmap to include luk3rr.com domain
+- name: Configure CoreDNS to use AdGuard as the upstream resolver
   hosts: localhost
   connection: local
   gather_facts: no
   vars:
-    local_domain: "luk3rr.com"
-    local_dns_server: "192.168.1.102"
+    adguard_ip: "192.168.1.102"
+
   tasks:
-    - name: Get existing Corefile from CoreDNS configmap
-      ansible.builtin.command: kubectl -n kube-system get configmap coredns -o json
-      register: coredns_configmap
+    - name: Get current CoreDNS ConfigMap
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: ConfigMap
+        name: coredns
+        namespace: kube-system
+      register: coredns_cm
 
-    - name: Modify Corefile to include luk3rr.com block
+    - name: Set original Corefile as a fact
       ansible.builtin.set_fact:
-        new_corefile: |
-          {{ coredns_configmap.stdout | from_json | json_query('data.Corefile') }}
-          {{ local_domain }}:53 {
-              errors
-              cache 30
-              forward . {{ local_dns_server }}
-          }
+        original_corefile: "{{ coredns_cm.resources[0].data.Corefile }}"
 
-    - name: Patch CoreDNS configmap with modified Corefile
+    - name: Prepare new Corefile by replacing the default forwarder
+      ansible.builtin.set_fact:
+        modified_corefile: "{{ original_corefile | regex_replace('forward \\. /etc/resolv.conf.*', 'forward . ' + adguard_ip) }}"
+
+    - name: Patch CoreDNS ConfigMap with the new Corefile
       kubernetes.core.k8s:
         state: present
         definition:
@@ -63,12 +65,11 @@
             name: coredns
             namespace: kube-system
           data:
-            Corefile: "{{ new_corefile }}"
+            Corefile: "{{ modified_corefile }}"
+      notify: Restart CoreDNS
 
-- name: Restart CoreDNS to apply new configuration
-  hosts: localhost
-  connection: local
-  gather_facts: no
-  tasks:
-    - name: Restart CoreDNS deployment
-      ansible.builtin.command: kubectl -n kube-system rollout restart deployment coredns
+  handlers:
+    - name: Restart CoreDNS
+      listen: "Restart CoreDNS"
+      ansible.builtin.command:
+        cmd: kubectl -n kube-system rollout restart deployment coredns
