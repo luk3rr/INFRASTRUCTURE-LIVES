@@ -28,25 +28,40 @@
         - net.bridge.bridge-nf-call-iptables
         - net.ipv4.ip_forward
 
-    - name: Disable IPv6 immediately
-      ansible.posix.sysctl:
-        name: "{{ item }}"
-        value: '1'
-        sysctl_set: yes
-        state: present
-        reload: yes
-      loop:
-        - net.ipv6.conf.all.disable_ipv6
-        - net.ipv6.conf.default.disable_ipv6
+    - name: Disable IPv6 at boot via GRUB
+      ansible.builtin.lineinfile:
+        path: /etc/default/grub
+        regexp: '^GRUB_CMDLINE_LINUX='
+        line: 'GRUB_CMDLINE_LINUX="ipv6.disable=1"'
 
-    - name: Persist disable IPv6 on reboot via cloud-init config
+    - name: Update GRUB to apply IPv6 disable
+      ansible.builtin.command: update-grub
+
+    - name: Persist IPv6 disable in sysctl.d
       ansible.builtin.copy:
-        dest: /etc/cloud/cloud.cfg.d/99-disable-ipv6.cfg
+        dest: /etc/sysctl.d/99-disable-ipv6.conf
         content: |
-          sysctl:
-            net.ipv6.conf.all.disable_ipv6: 1
-            net.ipv6.conf.default.disable_ipv6: 1
+          net.ipv6.conf.all.disable_ipv6 = 1
+          net.ipv6.conf.default.disable_ipv6 = 1
+          net.ipv6.conf.lo.disable_ipv6 = 1
         mode: '0644'
+
+    - name: Create netplan override to disable IPv6
+      ansible.builtin.copy:
+        dest: /etc/netplan/99-disable-ipv6.yaml
+        content: |
+          network:
+            version: 2
+            ethernets:
+              eth0:
+                dhcp6: no
+                accept-ra: no
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Apply netplan changes
+      ansible.builtin.command: netplan apply
 
 - name: K3s | Install K3s server
   ansible.builtin.shell:
