@@ -19,7 +19,7 @@
         state: present
         filename: php
 
-    - name: Install Nginx, Git, and specific PHP 8.1 packages
+    - name: Install Nginx, Git, and specific PHP 8.2 packages
       ansible.builtin.apt:
         name:
           - nginx
@@ -37,12 +37,41 @@
           - php8.2-zip
         state: present
 
-- name: Heimdall | Clone Heimdall repository from GitHub
+- name: Create systemd service to ensure /run/php directory exists
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/run-php-dir.service
+    content: |
+      [Unit]
+      Description=Ensure /run/php directory exists
+      Before=php8.2-fpm.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/bin/mkdir -p /run/php
+      ExecStart=/bin/chown www-data:www-data /run/php
+      ExecStart=/bin/chmod 0755 /run/php
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: '0644'
+
+- name: Enable and start run-php-dir service
+  ansible.builtin.systemd:
+    name: run-php-dir.service
+    enabled: true
+    state: started
+
+- name: Check if Heimdall directory exists
+  ansible.builtin.stat:
+    path: /opt/heimdall
+  register: heimdall_dir
+
+- name: Clone Heimdall repository from GitHub
   ansible.builtin.git:
     repo: 'https://github.com/linuxserver/Heimdall.git'
     dest: /opt/heimdall
     version: 'v2.7.4'
-    force: true
+  when: not heimdall_dir.stat.exists
 
 - name: Heimdall | Configure Nginx site
   ansible.builtin.template:
@@ -66,10 +95,11 @@
 - name: Heimdall | Configure Heimdall application
   block:
     - name: Create .env file from example
-      ansible.builtin.command:
-        cmd: cp .env.example .env
-        chdir: /opt/heimdall
-        creates: /opt/heimdall/.env
+      ansible.builtin.copy:
+        src: /opt/heimdall/.env.example
+        dest: /opt/heimdall/.env
+        remote_src: yes
+        force: no
 
     - name: Generate Laravel application key
       ansible.builtin.command:
@@ -98,3 +128,14 @@
         - /opt/heimdall/storage
         - /opt/heimdall/bootstrap/cache
 
+- name: Enable and start Nginx service
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: started
+
+- name: Enable and start PHP-FPM service
+  ansible.builtin.systemd:
+    name: php8.2-fpm
+    enabled: true
+    state: started
