@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: chartdb-deployment
+  name: chartdb
   namespace: chartdb
   labels:
     app: chartdb
