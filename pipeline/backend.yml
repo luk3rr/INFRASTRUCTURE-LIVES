@@ -4,3 +4,4 @@ include:
   - local: 'pipeline/build_migration.yml'
   - local: 'pipeline/deploy_migration.yml'
   - local: 'pipeline/deploy_migration_rollback.yml'
+  - local: 'pipeline/sonarqube.yml'

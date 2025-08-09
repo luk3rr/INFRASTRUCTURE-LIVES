@@ -1,0 +1,24 @@
+sonarqube:
+  image:
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  stage: quality
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: 0
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script:
+    - sonar-scanner 
+      -Dsonar.projectKey=${PROJECT_NAME}
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.token=${SONAR_TOKEN}
+      -Dsonar.gitlab.project_id=${CI_PROJECT_ID}
+      -Dsonar.gitlab.merge_request_iid=${CI_MERGE_REQUEST_IID}
+      -Dsonar.gitlab.commit_sha=${CI_COMMIT_SHA}
+      -Dsonar.gitlab.ref_name=${CI_COMMIT_REF_NAME}
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH == "main"'

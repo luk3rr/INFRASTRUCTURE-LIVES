@@ -1,3 +1,6 @@
+include:
+  - local: '/pipeline/sonarqube.yml'
+
 variables:
   SERVICE_GROUP: "personal/projects"
   PROJECT_NAME: "INFRASTRUCTURE_LIVES"
@@ -23,6 +26,7 @@ cache:
     - /cache/.gradle/caches/
 
 stages:
+  - quality
   - setup
   - applications
 
