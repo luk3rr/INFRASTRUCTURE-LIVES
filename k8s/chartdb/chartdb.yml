@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chartdb-deployment
+  namespace: chartdb
+  labels:
+    app: chartdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chartdb
+  template:
+    metadata:
+      labels:
+        app: chartdb
+    spec:
+      containers:
+        - name: chartdb
+          image: ghcr.io/chartdb/chartdb:latest
+          ports:
+            - containerPort: 80

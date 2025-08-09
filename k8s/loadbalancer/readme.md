@@ -1,8 +1,8 @@
 # IPs reservados para serviços
-- 192.168.1.231: PostgreSQL
+- 192.168.1.231: Excalidraw
 - 192.168.1.232: Hotela
 - 192.168.1.233: P2P Chat
-- 192.168.1.234: Excalidraw
+- 192.168.1.234: ChartDB
 
 # Desabilitar o Load Balancer Padrão do K3s (ServiceLB)
 ## Contexto

@@ -9,7 +9,4 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: vault-auth
-  namespace: database
-- kind: ServiceAccount
-  name: vault-auth
   namespace: hotela

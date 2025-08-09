@@ -1,17 +1,20 @@
 variables:
   SERVICE_GROUP: "personal/projects"
   PROJECT_NAME: "INFRASTRUCTURE_LIVES"
-  POSTGRES_DEPLOY_MANIFEST: "database/postgres.yml"
-  POSTGRES_NAMESPACE: "database"
-  EXCALIDRAW_DEPLOY_MANIFEST: "excalidraw/excalidraw.yml"
+
+  # Applications
+  EXCALIDRAW_DEPLOY_MANIFEST: "k8s/excalidraw/excalidraw.yml"
   EXCALIDRAW_NAMESPACE: "excalidraw"
-  VAULT_INJECTOR_DEPLOY_MANIFEST: "vault/vault_agent_injector.yml"
+  CHARTDB_DEPLOY_MANIFEST: "k8s/chartdb/chartdb.yml"
+  CHARTDB_NAMESPACE: "chartdb"
+  VAULT_INJECTOR_DEPLOY_MANIFEST: "k8s/vault/vault_agent_injector.yml"
   VAULT_NAMESPACE: "vault"
   METALLB_NATIVE_MANIFEST_URL: https://raw.githubusercontent.com/metallb/metallb/v0.15.2/config/manifests/metallb-native.yaml
-  LOAD_BALANCER_DEPLOY_MANIFEST: "loadbalancer/metallb-setup.yml"
+  LOAD_BALANCER_DEPLOY_MANIFEST: "k8s/loadbalancer/metallb-setup.yml"
   METALLB_NAMESPACE: "metallb-system"
-  LOAD_BALANCER_SERVICES_MANIFESTS_PATH: "loadbalancer/service"
-  SERVICE_ACCOUNT_MANIFESTS_PATH: "serviceaccount"
+  LOAD_BALANCER_SERVICES_MANIFESTS_PATH: "k8s/loadbalancer/service"
+  SERVICE_ACCOUNT_MANIFESTS_PATH: "k8s/serviceaccount"
+
   BUILD_CACHE_PATH: "/cache/.gradle"
 
 cache:
@@ -126,30 +129,6 @@ deploy_vault_agent_injector:
   rules:
     - when: manual
 
-deploy_postgres:
-  stage: setup
-  needs:
-    - job: config_service_accounts
-  image:
-    name: lachlanevenson/k8s-kubectl:latest
-    entrypoint: [""]
-  variables:
-    SERVICE_NAME: postgres
-  before_script:
-    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
-    - export KUBECONFIG=$PWD/kubeconfig
-  script:
-    - |
-      if ! kubectl get namespace $POSTGRES_NAMESPACE > /dev/null 2>&1; then
-          echo "Namespace $POSTGRES_NAMESPACE does not exist. Creating it."
-          kubectl create namespace $POSTGRES_NAMESPACE
-      fi
-    - kubectl apply -f $POSTGRES_DEPLOY_MANIFEST -n $POSTGRES_NAMESPACE
-    - echo "Waiting for Postgres deployment to be ready..."
-    - kubectl rollout status deployment/$SERVICE_NAME -n "$POSTGRES_NAMESPACE" --timeout=120s
-  rules:
-    - when: manual
-
 deploy_excalidraw:
   stage: setup
   needs:
@@ -174,22 +153,26 @@ deploy_excalidraw:
   rules:
     - when: manual
 
-destroy_infra:
-  stage: destroy
+deploy_chartdb:
+  stage: setup
+  needs:
+    - job: config_service_accounts
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
+  variables:
+    SERVICE_NAME: chartdb
   before_script:
     - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
     - export KUBECONFIG=$PWD/kubeconfig
   script:
-    - kubectl delete -f $VAULT_INJECTOR_DEPLOY_MANIFEST -n $VAULT_NAMESPACE --ignore-not-found
-    - kubectl delete -f $POSTGRES_DEPLOY_MANIFEST -n $POSTGRES_NAMESPACE --ignore-not-found
-    - kubectl delete -f $LOAD_BALANCER_DEPLOY_MANIFEST -n $METALLB_NAMESPACE --ignore-not-found
-    - kubectl delete -f $LOAD_BALANCER_SERVICES_MANIFESTS_PATH --ignore-not-found
-    - kubectl delete -f $METALLB_NATIVE_MANIFEST_URL --ignore-not-found
-    - kubectl delete namespace $METALLB_NAMESPACE --ignore-not-found
-    - kubectl delete namespace $POSTGRES_NAMESPACE --ignore-not-found
-    - kubectl delete namespace $VAULT_NAMESPACE --ignore-not-found
+    - |
+        if ! kubectl get namespace $CHARTDB_NAMESPACE > /dev/null 2>&1; then
+            echo "Namespace $CHARTDB_NAMESPACE does not exist. Creating it."
+            kubectl create namespace $CHARTDB_NAMESPACE
+        fi
+      - kubectl apply -f $CHARTDB_DEPLOY_MANIFEST -n $CHARTDB_NAMESPACE
+      - echo "Waiting for Excalidraw deployment to be ready..."
+      - kubectl rollout status deployment/$SERVICE_NAME -n "$CHARTDB_NAMESPACE" --timeout=120s
   rules:
     - when: manual
