@@ -1,0 +1,6 @@
+- name: Deploy Beszel
+  hosts: beszel
+  become: yes
+  gather_facts: yes
+  roles:
+    - beszel

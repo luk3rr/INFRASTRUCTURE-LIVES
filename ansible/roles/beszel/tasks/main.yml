@@ -1,0 +1,50 @@
+- name: Beszel | 1. Install prerequisite packages
+  ansible.builtin.apt:
+    name: ['curl', 'tar', 'sudo']
+    state: present
+    update_cache: yes
+
+- name: Beszel | 2. Create a dedicated user and group
+  ansible.builtin.user:
+    name: beszel
+    system: yes
+    shell: /bin/false
+    home: /opt/beszel
+
+- name: Beszel | 3. Create the application directory
+  ansible.builtin.file:
+    path: /opt/beszel
+    state: directory
+    owner: beszel
+    group: beszel
+    mode: '0755'
+
+- name: Beszel | 4. Set architecture fact for download URL
+  ansible.builtin.set_fact:
+    beszel_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+- name: Beszel | 5. Download and install the latest Beszel binary
+  ansible.builtin.shell:
+    cmd: >
+      curl -sL "https://github.com/henrygd/beszel/releases/latest/download/beszel_Linux_{{ beszel_arch }}.tar.gz" |
+      tar -xz -O beszel | tee ./beszel >/dev/null && chmod +x beszel
+    chdir: /opt/beszel
+    creates: /opt/beszel/beszel
+  become: yes
+  become_user: beszel
+
+- name: Beszel | 6. Create and enable the systemd service
+  block:
+    - name: Create systemd service file from template
+      ansible.builtin.template:
+        src: beszel.service.j2
+        dest: /etc/systemd/system/beszel.service
+        mode: '0644'
+      notify: Restart Beszel
+
+    - name: Enable and start the Beszel service
+      ansible.builtin.systemd:
+        name: beszel
+        state: started
+        enabled: yes
+        daemon_reload: yes

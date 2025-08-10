@@ -25,6 +25,7 @@ SERVICES_PLAYBOOKS=(
   "Gitlab Runner:gitlab-runner:--ask-vault-pass:gitlab_runner_token"
   "SonarQube:sonarqube:--ask-vault-pass:sonarqube_db_user,sonarqube_db_password"
   "My Speed:myspeed::"
+  "Beszel:beszel::"
 )
 
 PROXMOX_PLAYBOOKS=(
