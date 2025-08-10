@@ -1,0 +1,34 @@
+- name: Uninstall Beszel Agent from all hosts
+  hosts: lxc_containers, vms
+  become: yes
+  gather_facts: no
+
+  tasks:
+    - name: 1. Stop and disable the Beszel Agent service
+      ansible.builtin.systemd:
+        name: beszel-agent
+        state: stopped
+        enabled: no
+      ignore_errors: yes
+
+    - name: 2. Remove the systemd service file
+      ansible.builtin.file:
+        path: /etc/systemd/system/beszel-agent.service
+        state: absent
+      notify: Reload systemd
+
+    - name: 3. Remove the Beszel Agent application directory
+      ansible.builtin.file:
+        path: /opt/beszel-agent
+        state: absent
+
+    - name: 4. Remove the dedicated Beszel Agent user
+      ansible.builtin.user:
+        name: beszel-agent
+        state: absent
+        remove: yes
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: yes

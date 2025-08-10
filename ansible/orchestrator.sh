@@ -13,7 +13,7 @@ SECRETS_FILE="group_vars/secrets.yml"
 export ANSIBLE_COLLECTIONS_PATH="./collections"
 
 # Display name : Playbook name : Parameters : Secret keys
-SERVICES_PLAYBOOKS=(
+SERVICES_INSTALL_UPDATE_PLAYBOOKS=(
   "Adguard Home:adguard:--ask-vault-pass:"
   "Nginx Proxy Manager:npm::"
   "Uptime Kuma:kuma::"
@@ -26,13 +26,21 @@ SERVICES_PLAYBOOKS=(
   "SonarQube:sonarqube:--ask-vault-pass:sonarqube_db_user,sonarqube_db_password"
   "My Speed:myspeed::"
   "Beszel:beszel::"
-  "Beszel Agent:beszel-agent:--ask-vault-pass:beszel_agent_token,beszel_public_key,beszel_hub_url"
+  "Beszel Agent:beszel-agent:--ask-vault-pass,--limit:beszel_agent_token,beszel_public_key,beszel_hub_url"
+)
+
+SERVICES_UNINSTALL_PLAYBOOKS=(
+  "Beszel Agent:uninstall-beszel-agent:--limit:"
 )
 
 PROXMOX_PLAYBOOKS=(
   "Setup Proxmox Host:proxmox:--ask-vault-pass:proxmox_admin_email"
   "Create VM Template Cloud Init:create_vm_template::"
 )
+
+get_all_hosts() {
+  awk '/^\[(lxc_containers|vms)\]/{f=1;next} /^\[/{f=0} f && !/^\s*($|#)/{print $1}' inventory.ini
+}
 
 check_and_set_secret() {
   local secret_key="$1"
@@ -125,9 +133,51 @@ run_playbook() {
   local params="$2"
   local secret_keys_str="$3"
 
+  local limit_flag=""
+  local selected_hosts_display="all hosts"
   local CMD="ansible-playbook ${PLAYBOOKS_DIR}/${name}.yml"
 
-  if [[ "$params" == "--ask-vault-pass" ]]; then
+  if [[ "$params" == *"--limit"* ]]; then
+    msg_alert "This operation requires a host target. Please select:"
+    hosts=($(get_all_hosts))
+
+    echo "Available hosts:"
+    for i in "${!hosts[@]}"; do
+      echo "  $((i+1))) ${hosts[$i]}"
+    done
+    echo ""
+    read -p "Enter number(s) separated by comma (e.g., 1,3), or 'all': " user_selection
+
+    if [[ -z "$user_selection" ]]; then
+      msg_error "No selection made. Aborting."
+      return 1
+    fi
+
+    if [[ "$user_selection" != "all" ]]; then
+      local selected_host_names=""
+      IFS=',' read -r -a selections <<< "$user_selection"
+
+      for index in "${selections[@]}"; do
+        if ! [[ "$index" =~ ^[0-9]+$ ]] || [ "$index" -lt 1 ] || [ "$index" -gt "${#hosts[@]}" ]; then
+          msg_error "Invalid selection: '${index}'. Aborting."
+          return 1
+        fi
+
+        host_index=$((index-1))
+
+        if [ -z "$selected_host_names" ]; then
+          selected_host_names="${hosts[$host_index]}"
+        else
+          selected_host_names+=",${hosts[$host_index]}"
+        fi
+      done
+
+      limit_flag="--limit ${selected_host_names}"
+      selected_hosts_display="${selected_host_names}"
+    fi
+  fi
+
+  if [[ "$params" == *"--ask-vault-pass"* ]]; then
     if [[ -n "$secret_keys_str" ]]; then
       IFS=',' read -r -a secret_keys_arr <<< "$secret_keys_str"
 
@@ -142,7 +192,9 @@ run_playbook() {
     CMD+=" --vault-password-file <(printf \"%s\" \"$VAULT_PASS\")"
   fi
 
-  msg_info "Starting execution of '${name}'..."
+  CMD+=" ${limit_flag}"
+
+  msg_info "\nStarting execution of '${name}' on target(s): ${selected_hosts_display}..."
   eval "$CMD"
   msg_succ "Execution of '${name}' completed."
 }
@@ -171,48 +223,38 @@ show_k8s_menu() {
   done
 }
 
-show_install_update_menu() {
+show_menu() {
+  local menu_title="$1"
+  local -n playbook_array=$2
+
+  local display_names=()
+  for entry in "${playbook_array[@]}"; do
+    display_names+=("$(echo "$entry" | cut -d':' -f1)")
+  done
+
+  display_names+=("Back to Main Menu")
+
   PS3="Choose an option: "
 
-  options=("Install/Update a Specific Service" "Exit")
+  select opt in "${display_names[@]}"; do
+    if [[ "$opt" == "Back to Main Menu" ]]; then
+      break
+    elif [[ -n "$opt" ]]; then
+      for entry in "${playbook_array[@]}"; do
+        display_name=$(echo "$entry" | cut -d':' -f1)
 
-  select opt in "${options[@]}"; do
-    case $opt in
-      "Install/Update a Specific Service")
-        msg_alert "Select the service you want to install/update:"
+        if [[ "$display_name" == "$opt" ]]; then
+          playbook_name=$(echo "$entry" | cut -d':' -f2)
+          params=$(echo "$entry" | cut -d':' -f3)
+          secret_keys_str=$(echo "$entry" | cut -d':' -f4)
 
-        service_names=()
-        for entry in "${SERVICES_PLAYBOOKS[@]}"; do
-          service_names+=("$(echo "$entry" | cut -d':' -f1)")
-        done
-
-        select target_service in "${service_names[@]}"; do
-          if [[ -n "$target_service" ]]; then
-            for entry in "${SERVICES_PLAYBOOKS[@]}"; do
-              display_name=$(echo "$entry" | cut -d':' -f1)
-              playbook_name=$(echo "$entry" | cut -d':' -f2)
-              params=$(echo "$entry" | cut -d':' -f3)
-              secret_keys_str=$(echo "$entry" | cut -d':' -f4)
-
-              if [[ "$display_name" == "$target_service" ]]; then
-                run_playbook "$playbook_name" "$params" "$secret_keys_str"
-                break
-              fi
-            done
-          else
-            msg_error "Invalid selection."
-          fi
-          break
-        done
-        break
-        ;;
-      "Exit")
-        break
-        ;;
-      *)
-        msg_error "Invalid option: $REPLY"
-        ;;
-    esac
+          run_playbook "$playbook_name" "$params" "$secret_keys_str"
+          break 2
+        fi
+      done
+    else
+      msg_error "Invalid selection."
+    fi
   done
 }
 
@@ -264,33 +306,38 @@ show_proxmox_menu() {
   done
 }
 
+# =================================================================================
+# PONTO DE ENTRADA DO SCRIPT
+# =================================================================================
 msg_title "Ansible Homelab Orchestrator"
-PS3="Choose an operation area (enter the number): "
-main_options=("Proxmox Setup" "Install/Update Services" "Manage Kubernetes" "Manage Vault Secrets" "Exit")
+PS3="Choose an operation area: "
+main_options=("Install/Update Services" "Uninstall Services" "Manage Kubernetes" "Manage Backups" "Exit")
 
-select opt in "${main_options[@]}"; do
-  case $opt in
-    "Proxmox Setup")
-      show_proxmox_menu
-      break
-      ;;
-    "Install/Update Services")
-      show_install_update_menu
-      break
-      ;;
-    "Manage Kubernetes")
-      show_k8s_menu
-      break
-      ;;
-    "Manage Vault Secrets")
-      show_vault_menu
-      break
-      ;;
-    "Exit")
-      break
-      ;;
-    *)
-      msg_error "Invalid option: $REPLY"
-      ;;
-  esac
+while true; do
+  select opt in "${main_options[@]}"; do
+    case $opt in
+      "Install/Update Services")
+        show_menu "Select the service to install/update:" SERVICES_INSTALL_UPDATE_PLAYBOOKS
+        break
+        ;;
+      "Uninstall Services")
+        show_menu "Select the service to uninstall:" SERVICES_UNINSTALL_PLAYBOOKS
+        break
+        ;;
+      "Manage Kubernetes")
+        show_k8s_menu
+        break
+        ;;
+      "Manage Vault Secrets")
+        show_vault_menu
+        break
+        ;;
+      "Exit")
+        exit 0
+        ;;
+      *)
+        msg_error "Invalid option: $REPLY"
+        ;;
+    esac
+  done
 done
