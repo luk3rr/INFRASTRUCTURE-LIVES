@@ -11,6 +11,7 @@ source "$BASH_BEAUTIFUL"
 PLAYBOOKS_DIR="playbooks"
 SECRETS_FILE="group_vars/secrets.yml"
 export ANSIBLE_COLLECTIONS_PATH="./collections"
+LINE="=========================================================================="
 
 # Display name : Playbook name : Parameters : Secret keys
 SERVICES_INSTALL_UPDATE_PLAYBOOKS=(
@@ -306,12 +307,51 @@ show_proxmox_menu() {
   done
 }
 
+show_secrets_menu() {
+  PS3="Choose a secrets operation: "
+  options=("View Secrets" "Edit Secrets" "Back to Main Menu")
+
+  if [[ ! -f "${SECRETS_FILE}" ]]; then
+    msg_error "Secrets file '${SECRETS_FILE}' does not exist. Please, create it first"
+    return
+  fi
+
+  if [[ -z "$VAULT_PASS" ]]; then
+    read -sp "Enter Ansible Vault password to access secrets: " VAULT_PASS
+    echo
+  fi
+
+
+while true; do
+  select opt in "${options[@]}"; do
+    case $opt in
+      "View Secrets")
+        msg_info "${LINE}"
+        ansible-vault view "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS")
+        msg_info "${LINE}"
+        break
+        ;;
+      "Edit Secrets")
+        ansible-vault edit "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS")
+        break
+        ;;
+      "Back to Main Menu")
+        break 2
+        ;;
+      *)
+        msg_error "Invalid option: $REPLY"
+        ;;
+    esac
+  done
+done
+}
+
 # =================================================================================
 # PONTO DE ENTRADA DO SCRIPT
 # =================================================================================
 msg_title "Ansible Homelab Orchestrator"
 PS3="Choose an operation area: "
-main_options=("Install/Update Services" "Uninstall Services" "Manage Kubernetes" "Manage Backups" "Exit")
+main_options=("Install/Update Services" "Uninstall Services" "Manage Kubernetes" "Manage Vault" "Manage Ansible Secrets" "Exit")
 
 while true; do
   select opt in "${main_options[@]}"; do
@@ -328,8 +368,12 @@ while true; do
         show_k8s_menu
         break
         ;;
-      "Manage Vault Secrets")
+      "Manage Vault")
         show_vault_menu
+        break
+        ;;
+      "Manage Ansible Secrets")
+        show_secrets_menu
         break
         ;;
       "Exit")
