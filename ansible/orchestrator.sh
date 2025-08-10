@@ -26,6 +26,7 @@ SERVICES_PLAYBOOKS=(
   "SonarQube:sonarqube:--ask-vault-pass:sonarqube_db_user,sonarqube_db_password"
   "My Speed:myspeed::"
   "Beszel:beszel::"
+  "Beszel Agent:beszel-agent:--ask-vault-pass:beszel_agent_token,beszel_public_key,beszel_hub_url"
 )
 
 PROXMOX_PLAYBOOKS=(

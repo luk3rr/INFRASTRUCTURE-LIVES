@@ -1,0 +1,17 @@
+[Unit]
+Description=Beszel Agent Service
+After=network.target
+
+[Service]
+Environment="PORT={{ beszel_port | default(45876) }}"
+Environment="KEY={{ beszel_public_key }}"
+Environment="TOKEN={{ beszel_agent_token }}"
+Environment="HUB_URL={{ beszel_hub_url }}"
+ExecStart=/opt/beszel-agent/beszel-agent
+User=beszel
+Restart=on-failure
+RestartSec=5
+StateDirectory=beszel-agent
+
+[Install]
+WantedBy=multi-user.target

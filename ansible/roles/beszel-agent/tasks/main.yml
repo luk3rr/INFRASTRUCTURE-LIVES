@@ -1,0 +1,58 @@
+- name: Beszel Agent | Install prerequisite packages
+  ansible.builtin.apt:
+    name: ['curl', 'tar', 'ca-certificates', 'jq']
+    state: present
+    update_cache: yes
+
+- name: Check if user exists
+  ansible.builtin.getent:
+    database: passwd
+    key: beszel
+  register: beszel_user
+  ignore_errors: yes
+
+- name: Beszel Agent | Create a dedicated user and group
+  ansible.builtin.user:
+    name: beszel
+    system: yes
+    shell: /bin/false
+    home: /opt/beszel-agent
+  when: beszel_user is failed
+
+- name: Beszel Agent | Create the application directory
+  ansible.builtin.file:
+    path: /opt/beszel-agent
+    state: directory
+    owner: beszel
+    group: beszel
+    mode: '0755'
+
+- name: Beszel Agent | Set architecture fact for download URL
+  ansible.builtin.set_fact:
+    beszel_arch: "{{ 'amd64' if ansible_architecture == 'x86_64' else 'arm64' }}"
+
+- name: Beszel Agent | Download and install the latest Beszel agent binary
+  ansible.builtin.unarchive:
+    src: "https://github.com/henrygd/beszel/releases/latest/download/beszel-agent_Linux_{{ beszel_arch }}.tar.gz"
+    dest: /opt/beszel-agent/
+    remote_src: yes
+    owner: beszel
+    group: beszel
+    mode: '0755'
+    creates: /opt/beszel-agent/beszel-agent
+
+- name: Beszel Agent | Create and enable the systemd service
+  block:
+    - name: Create systemd service file from template
+      ansible.builtin.template:
+        src: beszel-agent.service.j2
+        dest: /etc/systemd/system/beszel-agent.service
+        mode: '0644'
+      notify: Restart Beszel Agent
+
+    - name: Enable and start the Beszel agent service
+      ansible.builtin.systemd:
+        name: beszel-agent
+        state: started
+        enabled: yes
+        daemon_reload: yes

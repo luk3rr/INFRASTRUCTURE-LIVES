@@ -1,0 +1,10 @@
+- name: Deploy Beszel Agent to all hosts
+  hosts: lxc_containers, vms
+  become: yes
+  gather_facts: yes
+
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  roles:
+    - beszel-agent
