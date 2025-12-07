@@ -1,0 +1,229 @@
+- name: Dev Tools | Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Dev Tools | Install development tools and utilities
+  ansible.builtin.apt:
+    name:
+      - build-essential
+      - gcc
+      - g++
+      - gcc-9
+      - g++-9
+      - gdb
+      - make
+      - cmake
+      - ninja-build
+      - git
+      - curl
+      - wget
+      - vim
+      - nano
+      - htop
+      - tmux
+      - tree
+      - unzip
+      - zip
+      - python3
+      - python3-pip
+      - python3-dev
+      - python3-venv
+      - gnuplot
+      - gnuplot-x11
+      - valgrind
+      - clang
+      - clang-format
+      - ccache
+      - pkg-config
+      - autoconf
+      - automake
+      - libtool
+    state: present
+
+- name: Dev Tools | Add GitHub SSH key to known_hosts
+  ansible.builtin.known_hosts:
+    name: github.com
+    key: "{{ lookup('pipe', 'ssh-keyscan -t rsa github.com') }}"
+    state: present
+
+- name: Dev Tools | Create .ssh directory for ubuntu user
+  ansible.builtin.file:
+    path: /home/ubuntu/.ssh
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0700'
+
+- name: Dev Tools | Generate SSH key for GitHub
+  ansible.builtin.openssh_keypair:
+    path: /home/ubuntu/.ssh/id_ed25519
+    type: ed25519
+    owner: ubuntu
+    group: ubuntu
+    mode: '0600'
+  register: ssh_key_generated
+
+- name: Dev Tools | Display SSH public key
+  ansible.builtin.debug:
+    msg: |
+      SSH key gerada com sucesso!
+      
+      Para adicionar ao GitHub:
+      1. Copie a chave pública abaixo
+      2. Acesse: https://github.com/settings/ssh/new
+      3. Cole a chave e salve
+      
+      Chave pública:
+      {{ lookup('file', '/home/ubuntu/.ssh/id_ed25519.pub') }}
+  when: ssh_key_generated.changed
+
+- name: Dev Tools | Create projects directory
+  ansible.builtin.file:
+    path: /home/ubuntu/projects
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: '0755'
+
+- name: Dev Tools | Configure git global settings
+  ansible.builtin.git_config:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    scope: global
+  become_user: ubuntu
+  become: yes
+  loop:
+    - { name: 'core.editor', value: 'vim' }
+    - { name: 'init.defaultBranch', value: 'main' }
+    - { name: 'pull.rebase', value: 'false' }
+
+- name: Dev Tools | Create useful aliases in bashrc
+  ansible.builtin.blockinfile:
+    path: /home/ubuntu/.bashrc
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - DEV ALIASES"
+    block: |
+      # Development aliases
+      alias ll='ls -alF'
+      alias la='ls -A'
+      alias l='ls -CF'
+      alias ..='cd ..'
+      alias ...='cd ../..'
+      alias gs='git status'
+      alias gp='git pull'
+      alias gc='git commit'
+      alias gd='git diff'
+      alias gl='git log --oneline --graph --decorate'
+      
+      # Python virtual environment
+      alias venv='python3 -m venv venv'
+      alias activate='source venv/bin/activate'
+      
+      # Useful functions
+      mkcd() { mkdir -p "$1" && cd "$1"; }
+    owner: ubuntu
+    group: ubuntu
+    create: yes
+
+- name: Dev Tools | Install Python virtual environment tools
+  ansible.builtin.apt:
+    name:
+      - python3-pip
+      - python3-venv
+      - python3-full
+    state: present
+
+- name: Dev Tools | Create README for user
+  ansible.builtin.copy:
+    dest: /home/ubuntu/README.md
+    content: |
+      # VM de Desenvolvimento
+      
+      ## Ferramentas Instaladas
+      
+      ### Compiladores e Build Tools
+      - GCC/G++ (C/C++)
+      - Clang
+      - Make, CMake, Ninja
+      - Python 3
+      
+      ### Ferramentas de Análise
+      - GDB (debugger)
+      - Valgrind (memory profiler)
+      - clang-format (code formatter)
+      
+      ### Utilitários
+      - Git
+      - Gnuplot
+      - tmux, htop, tree
+      - vim, nano
+      
+      ### Python
+      - python3, pip, venv (para ambientes virtuais)
+      
+      ## Configuração do GitHub
+      
+      Uma chave SSH foi gerada em `~/.ssh/id_ed25519`
+      
+      Para adicionar ao GitHub:
+      ```bash
+      cat ~/.ssh/id_ed25519.pub
+      ```
+      
+      Copie a saída e adicione em: https://github.com/settings/ssh/new
+      
+      ## Clonar Repositórios
+      
+      Após adicionar a chave SSH no GitHub:
+      ```bash
+      cd ~/projects
+      git clone git@github.com:seu-usuario/seu-repo.git
+      ```
+      
+      ## Compilar Código C++
+      
+      ```bash
+      # Exemplo simples
+      g++ -o programa programa.cpp
+      ./programa
+      
+      # Com otimização
+      g++ -O3 -o programa programa.cpp
+      
+      # Com debug
+      g++ -g -o programa programa.cpp
+      gdb ./programa
+      ```
+      
+      ## Usar Gnuplot
+      
+      ```bash
+      gnuplot
+      # Dentro do gnuplot:
+      plot 'dados.txt' with lines
+      ```
+      
+      ## Python Virtual Environment
+      
+      ```bash
+      # Criar ambiente virtual
+      python3 -m venv meu_projeto
+      cd meu_projeto
+      source bin/activate
+      
+      # Instalar pacotes
+      pip install numpy matplotlib
+      ```
+      
+      ## Aliases Úteis
+      
+      - `ll` - lista detalhada
+      - `gs` - git status
+      - `gp` - git pull
+      - `gc` - git commit
+      - `gl` - git log formatado
+      - `venv` - criar ambiente virtual Python
+      - `activate` - ativar ambiente virtual
+    owner: ubuntu
+    group: ubuntu
+    mode: '0644'

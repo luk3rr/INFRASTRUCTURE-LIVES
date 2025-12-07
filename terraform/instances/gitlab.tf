@@ -13,5 +13,5 @@ module "gitlab" {
 
   cpu_cores = 4
   memory    = 16368
-  disk_size = 128
+  disk_size = 240
 }

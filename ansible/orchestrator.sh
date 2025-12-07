@@ -28,6 +28,7 @@ SERVICES_INSTALL_UPDATE_PLAYBOOKS=(
   "My Speed:myspeed::"
   "Beszel:beszel::"
   "Beszel Agent:beszel-agent:--ask-vault-pass,--limit:beszel_agent_token,beszel_public_key,beszel_hub_url"
+  "Development VM:dev-vm::"
 )
 
 SERVICES_UNINSTALL_PLAYBOOKS=(
@@ -136,7 +137,7 @@ run_playbook() {
 
   local limit_flag=""
   local selected_hosts_display="all hosts"
-  local CMD="ansible-playbook ${PLAYBOOKS_DIR}/${name}.yml"
+  local CMD="ansible-playbook -i inventory.ini ${PLAYBOOKS_DIR}/${name}.yml"
 
   if [[ "$params" == *"--limit"* ]]; then
     msg_alert "This operation requires a host target. Please select:"

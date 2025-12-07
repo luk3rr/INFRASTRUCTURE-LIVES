@@ -1,0 +1,6 @@
+---
+- name: Setup Development VM
+  hosts: dev-vm
+  become: yes
+  roles:
+    - ../roles/dev-tools
