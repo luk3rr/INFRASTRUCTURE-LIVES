@@ -3,3 +3,8 @@
     name: AdGuardHome
     state: restarted
     enabled: true
+
+- name: Restart networking
+  ansible.builtin.service:
+    name: networking
+    state: restarted

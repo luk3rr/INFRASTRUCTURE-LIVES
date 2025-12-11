@@ -1,4 +1,11 @@
 ---
+- name: Configure network interfaces for AdGuard VM
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces
+    mode: '0644'
+  notify: Restart networking
+
 - name: AdGuard | Check latest version
   ansible.builtin.uri:
     url: "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
