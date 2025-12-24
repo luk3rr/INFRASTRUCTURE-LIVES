@@ -76,6 +76,58 @@ check_and_set_secret() {
   fi
 }
 
+set_vault_unseal_keys() {
+  if [[ -z "$VAULT_PASS" ]]; then
+    read -sp "Enter Ansible Vault password: " VAULT_PASS
+    echo
+  fi
+
+  msg_info "Entering Vault Unseal Keys setup."
+  msg_info "Enter the keys one by one. Leave empty and press Enter to finish."
+  
+  KEYS_BLOCK=""
+  counter=1
+  while true; do
+    read -p "Key #${counter}: " key_input
+    if [[ -z "$key_input" ]]; then
+      break
+    fi
+    KEYS_BLOCK="${KEYS_BLOCK}\n  - \"${key_input}\""
+    ((counter++))
+  done
+
+  if [[ -z "$KEYS_BLOCK" ]]; then
+    msg_alert "No keys provided. Operation cancelled."
+    return
+  fi
+
+  msg_info "Updating secrets file..."
+
+  local temp_file
+  temp_file=$(mktemp)
+  
+  if ! ansible-vault decrypt "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS") --output "${temp_file}" 2>/dev/null; then
+     msg_error "Failed to decrypt secrets file. Check your password."
+     rm "$temp_file"
+     return 1
+  fi
+
+  if grep -q "^vault_unseal_keys:" "$temp_file"; then
+      msg_alert "The 'vault_unseal_keys' variable already exists in secrets.yml."
+      msg_info "To avoid corruption, this script won't overwrite it automatically via Bash."
+      msg_info "Please use 'Edit Secrets' option to modify them manually."
+      rm "$temp_file"
+      return 1
+  else
+      echo -e "\nvault_unseal_keys:${KEYS_BLOCK}" >> "$temp_file"
+      
+      ansible-vault encrypt "${temp_file}" --vault-password-file <(printf "%s" "$VAULT_PASS") --output "${SECRETS_FILE}" 2>/dev/null
+      msg_succ "Vault keys added successfully to ${SECRETS_FILE}."
+  fi
+
+  rm "$temp_file"
+}
+
 k8s_gitlab_integration() {
   msg_alert "This script will create the GitLab registry secret in Kubernetes."
   read -p "Enter the email for the registry secret: " REGISTRY_EMAIL
@@ -262,12 +314,22 @@ show_menu() {
 
 show_vault_menu() {
   PS3="Choose an option: "
-  options=("Create/Update App Secret" "Exit")
+  options=("Create/Update App Secret" "Unseal Vault" "Set Unseal Keys" "Exit")
 
   select opt in "${options[@]}"; do
     case $opt in
       "Create/Update App Secret")
         k8s_app_secret_creation
+        break
+        ;;
+      "Set Unseal Keys")
+        set_vault_unseal_keys
+        break
+        ;;
+      "Unseal Vault")
+        msg_info "Checking Vault status and unsealing if necessary..."
+        ansible-playbook "${PLAYBOOKS_DIR}/vault-unseal.yml" --ask-vault-pass
+        msg_succ "Operation finished"
         break
         ;;
       "Exit")

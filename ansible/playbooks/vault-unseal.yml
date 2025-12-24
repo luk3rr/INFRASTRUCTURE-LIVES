@@ -1,0 +1,48 @@
+---
+- name: Unseal HashiCorp Vault via API
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  vars_files:
+    - ../group_vars/secrets.yml
+
+  tasks:
+    - name: "Check Vault Seal Status"
+      ansible.builtin.uri:
+        url: "http://{{ hostvars['vault'].ansible_host }}:8200/v1/sys/seal-status"
+        method: GET
+        return_content: yes
+        status_code: 200
+      register: vault_status_check
+
+    - name: "Display Current Status"
+      debug:
+        msg: "Vault is currently {{ 'SEALED' if vault_status_check.json.sealed else 'UNSEALED (Active)' }}"
+
+    - name: "Submit Unseal Keys"
+      ansible.builtin.uri:
+        url: "http://{{ hostvars['vault'].ansible_host }}:8200/v1/sys/unseal"
+        method: POST
+        body_format: json
+        body:
+          key: "{{ item }}"
+        status_code: [200, 400] 
+      loop: "{{ vault_unseal_keys }}"
+      when: vault_status_check.json.sealed == true
+      register: unseal_attempt
+      no_log: true 
+
+    - name: "Check Final Status"
+      ansible.builtin.uri:
+        url: "http://{{ hostvars['vault'].ansible_host }}:8200/v1/sys/seal-status"
+        method: GET
+        return_content: yes
+      register: vault_final_status
+      when: vault_status_check.json.sealed == true
+
+    - name: "Confirm Unseal Success"
+      debug:
+        msg: "Success! Vault is now Unsealed."
+      when: 
+        - vault_status_check.json.sealed == true
+        - vault_final_status.json.sealed == false
