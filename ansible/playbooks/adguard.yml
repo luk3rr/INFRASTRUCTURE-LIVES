@@ -2,6 +2,7 @@
   hosts: adguard
   become: yes
   roles:
+    - disable-ipv6
     - adguard
   vars_files:
     - ../group_vars/secrets.yml

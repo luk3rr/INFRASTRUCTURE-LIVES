@@ -3,4 +3,5 @@
   become: yes
   gather_facts: yes
   roles:
+    - disable-ipv6
     - beszel

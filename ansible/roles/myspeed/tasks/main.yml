@@ -2,7 +2,7 @@
   block:
     - name: Install prerequisite packages
       ansible.builtin.apt:
-        name: ['curl', 'unzip', 'nodejs', 'sudo']
+        name: ['curl', 'unzip', 'sudo']
         state: present
         update_cache: yes
 
@@ -15,11 +15,14 @@
     - name: Run Node.js setup script
       ansible.builtin.command:
         cmd: /tmp/nodesource_setup.sh
-        creates: /etc/apt/sources.list.d/nodesource.list
 
-    - name: Install Node.js
+    - name: Update apt cache after adding NodeSource repository
       ansible.builtin.apt:
-        name: nodejs
+        update_cache: yes
+
+    - name: Install Node.js and npm
+      ansible.builtin.apt:
+        name: ['nodejs', 'npm']
         state: present
 
 - name: MySpeed | Create a dedicated user for MySpeed

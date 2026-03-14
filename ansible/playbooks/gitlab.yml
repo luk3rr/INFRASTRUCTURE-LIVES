@@ -2,6 +2,7 @@
   hosts: gitlab
   become: yes
   roles:
+    - disable-ipv6
     - gitlab
   vars_files:
     - ../group_vars/secrets.yml

@@ -2,4 +2,5 @@
   hosts: npm
   become: yes
   roles:
+    - disable-ipv6
     - npm

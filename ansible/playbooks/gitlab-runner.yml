@@ -15,6 +15,7 @@
   become: yes
   gather_facts: yes
   roles:
+    - disable-ipv6
     - gitlab-runner
   vars_files:
     - ../group_vars/secrets.yml

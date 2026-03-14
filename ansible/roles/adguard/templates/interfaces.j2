@@ -3,9 +3,11 @@ iface lo inet loopback
 
 auto eth0
 iface eth0 inet static
-address 192.168.1.102/24
-gateway 192.168.1.1
+    address 192.168.1.102/24
+    gateway 192.168.1.1
 
 iface eth0 inet6 static
-address 2804:5c:4de5:f000::102/64
-gateway fe80::1
+    address 2804:5c:4db4:5a00::102/64
+    gateway fe80::1
+    accept_ra 0
+    autoconf 0

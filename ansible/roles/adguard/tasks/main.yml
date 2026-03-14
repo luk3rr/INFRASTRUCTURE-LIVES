@@ -4,19 +4,13 @@
     src: interfaces.j2
     dest: /etc/network/interfaces
     mode: '0644'
+    backup: true
   notify: Restart networking
 
-- name: AdGuard | Check latest version
-  ansible.builtin.uri:
-    url: "https://api.github.com/repos/AdguardTeam/AdGuardHome/releases/latest"
-    return_content: yes
-  register: adguard_latest_release
-  check_mode: no
-
-- name: AdGuard | Set latest version fact
+- name: AdGuard | Set version fact
   ansible.builtin.set_fact:
-    adguard_version: "{{ adguard_latest_release.json.tag_name }}"
-    adguard_download_url: "https://github.com/AdguardTeam/AdGuardHome/releases/download/{{ adguard_latest_release.json.tag_name }}/AdGuardHome_linux_amd64.tar.gz"
+    adguard_version: "v0.107.64"
+    adguard_download_url: "https://github.com/AdguardTeam/AdGuardHome/releases/download/v0.107.64/AdGuardHome_linux_amd64.tar.gz"
 
 - name: AdGuard | Download and unarchive
   ansible.builtin.unarchive:
@@ -36,3 +30,8 @@
   ansible.builtin.command:
     cmd: /opt/AdGuardHome/AdGuardHome -s install
     creates: /etc/systemd/system/AdGuardHome.service
+
+- name: Verify IPv6 configuration
+  ansible.builtin.command: ip -6 addr show dev eth0
+  register: ipv6_result
+  changed_when: false

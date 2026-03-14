@@ -7,4 +7,5 @@
     - ../group_vars/secrets.yml
 
   roles:
+    - disable-ipv6
     - beszel-agent

@@ -3,6 +3,7 @@
   become: yes
   gather_facts: yes
   roles:
+    - disable-ipv6
     - postgres
   vars_files:
     - ../group_vars/secrets.yml

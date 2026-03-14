@@ -5,11 +5,11 @@
     update_cache: yes
 
 - name: Check if user exists
-  ansible.builtin.getent:
-    database: passwd
-    key: beszel
+  ansible.builtin.command:
+    cmd: id beszel
   register: beszel_user
   ignore_errors: yes
+  changed_when: false
 
 - name: Beszel Agent | Create a dedicated user and group
   ansible.builtin.user:
@@ -17,7 +17,7 @@
     system: yes
     shell: /bin/false
     home: /opt/beszel-agent
-  when: beszel_user is failed
+  when: beszel_user.rc != 0
 
 - name: Beszel Agent | Create the application directory
   ansible.builtin.file:

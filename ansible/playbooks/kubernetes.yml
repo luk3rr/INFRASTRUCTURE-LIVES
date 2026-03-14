@@ -3,6 +3,7 @@
   become: yes
   gather_facts: yes
   roles:
+    - disable-ipv6
     - k3s
 
 - name: Configure local kubectl for the new cluster
