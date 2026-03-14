@@ -370,9 +370,59 @@ show_proxmox_menu() {
   done
 }
 
+backup_ansible_secrets() {
+  msg_alert "This will backup your Ansible secrets"
+  
+  if [[ ! -f "${SECRETS_FILE}" ]]; then
+    msg_error "Secrets file '${SECRETS_FILE}' does not exist."
+    return 1
+  fi
+
+  local backup_dir="${ANSIBLE_BACKUP_DIR}"
+  local backup_filename="${ANSIBLE_BACKUP_FILENAME}"
+  local backup_file="${backup_dir}/${backup_filename}"
+
+  if [[ -z "$backup_dir" || -z "$backup_filename" ]]; then
+    msg_error "ANSIBLE_BACKUP_DIR or ANSIBLE_BACKUP_FILENAME environment variable is not set."
+    msg_info "Please define it in your .zshrc or shell configuration."
+    return 1
+  fi
+
+  if [[ ! -d "$backup_dir" ]]; then
+    msg_error "Backup directory '$backup_dir' does not exist."
+    return 1
+  fi
+
+  msg_info "Updating backup: ${backup_file}"
+
+  local temp_dir
+  temp_dir=$(mktemp -d)
+  trap "rm -rf $temp_dir" EXIT
+
+  if [[ -f "$backup_file" ]]; then
+    msg_info "Extracting existing backup..."
+    if ! gpg --decrypt "$backup_file" 2>/dev/null | tar xf - -C "$temp_dir"; then
+      msg_error "Failed to extract existing backup."
+      return 1
+    fi
+  fi
+
+  msg_info "Adding ansible_secrets.yml to backup..."
+  cp "${SECRETS_FILE}" "${temp_dir}/rec/ansible_secrets.yml"
+
+  msg_info "Re-encrypting backup..."
+  if tar cf - -C "$temp_dir" . | gpg --symmetric --cipher-algo AES256 --output "${backup_file}"; then
+    msg_succ "Backup updated successfully: ${backup_file}"
+    msg_info "File size: $(du -h "${backup_file}" | cut -f1)"
+  else
+    msg_error "Failed to create backup."
+    return 1
+  fi
+}
+
 show_secrets_menu() {
   PS3="Choose a secrets operation: "
-  options=("View Secrets" "Edit Secrets" "Back to Main Menu")
+  options=("View Secrets" "Edit Secrets" "Backup Secrets" "Back to Main Menu")
 
   if [[ ! -f "${SECRETS_FILE}" ]]; then
     msg_error "Secrets file '${SECRETS_FILE}' does not exist. Please, create it first"
@@ -396,6 +446,10 @@ while true; do
         ;;
       "Edit Secrets")
         ansible-vault edit "${SECRETS_FILE}" --vault-password-file <(printf "%s" "$VAULT_PASS")
+        break
+        ;;
+      "Backup Secrets")
+        backup_ansible_secrets
         break
         ;;
       "Back to Main Menu")
