@@ -1,0 +1,111 @@
+- name: Overleaf | Configure DNS for Docker
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: |
+      {
+        "dns": ["192.168.1.102", "8.8.8.8"]
+      }
+    mode: '0644'
+  notify: Restart Docker
+
+- name: Overleaf | Install Docker
+  block:
+    - name: Install prerequisite packages
+      ansible.builtin.apt:
+        name: ['ca-certificates', 'curl']
+        state: present
+        update_cache: yes
+
+    - name: Download and run the official Docker convenience script
+      ansible.builtin.shell:
+        cmd: curl -fsSL https://get.docker.com | sh
+        creates: /usr/bin/docker
+
+    - name: Install Docker SDK for Python
+      ansible.builtin.apt:
+        name: python3-docker
+        state: present
+
+    - name: Ensure Docker service is started
+      ansible.builtin.systemd:
+        name: docker
+        state: started
+        enabled: yes
+
+- name: Overleaf | Install Docker Compose
+  ansible.builtin.get_url:
+    url: "https://github.com/docker/compose/releases/download/v2.24.5/docker-compose-linux-x86_64"
+    dest: /usr/local/bin/docker-compose
+    mode: '0755'
+
+- name: Overleaf | Create application directory
+  ansible.builtin.file:
+    path: /opt/overleaf
+    state: directory
+    mode: '0755'
+
+- name: Overleaf | Create data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - /opt/overleaf/data
+    - /opt/overleaf/mongo
+
+- name: Overleaf | Deploy docker-compose.yml
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: /opt/overleaf/docker-compose.yml
+    mode: '0644'
+  notify: Restart Overleaf
+
+- name: Overleaf | Start Overleaf services
+  community.docker.docker_compose_v2:
+    project_src: /opt/overleaf
+    state: present
+  register: overleaf_output
+
+- name: Overleaf | Display service status
+  ansible.builtin.debug:
+    msg: "Overleaf services started. Access at 192.168.1.113"
+
+- name: Overleaf | Wait for Overleaf to be ready
+  ansible.builtin.wait_for:
+    host: localhost
+    port: 80
+    delay: 10
+    timeout: 120
+
+- name: Overleaf | Install TexLive Full from Debian
+  ansible.builtin.command:
+    cmd: docker exec overleaf bash -c "apt-get update && apt-get install -y texlive-full texlive-generic-recommended"
+  register: texlive_full
+  failed_when: false
+  changed_when: texlive_full.rc == 0
+
+- name: Overleaf | Copy all LaTeX packages from Debian to TexLive 2024
+  ansible.builtin.shell:
+    cmd: |
+      docker exec overleaf bash -c '
+      # Copiar todos os pacotes LaTeX
+      cp -r /usr/share/texlive/texmf-dist/tex/latex/* /usr/local/texlive/2024/texmf-dist/tex/latex/ 2>/dev/null || true
+      
+      # Copiar pacotes genéricos (ulem, etc)
+      cp -r /usr/share/texlive/texmf-dist/tex/generic/* /usr/local/texlive/2024/texmf-dist/tex/generic/ 2>/dev/null || true
+      
+      # Copiar todas as fontes
+      cp -r /usr/share/texlive/texmf-dist/fonts/* /usr/local/texlive/2024/texmf-dist/fonts/ 2>/dev/null || true
+      
+      # Atualizar cache
+      texhash
+      '
+  when: texlive_full.changed
+  register: copy_all
+  failed_when: false
+  changed_when: copy_all.rc == 0
+
+- name: Overleaf | Restart Overleaf container
+  ansible.builtin.command:
+    cmd: docker restart overleaf
+  when: texlive_full.changed or copy_all.changed

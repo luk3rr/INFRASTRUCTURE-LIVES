@@ -1,0 +1,58 @@
+services:
+  sharelatex:
+    image: sharelatex/sharelatex:5.2.1
+    container_name: overleaf
+    restart: unless-stopped
+    depends_on:
+      - mongo
+      - redis
+    ports:
+      - "80:80"
+    volumes:
+      - /opt/overleaf/data:/var/lib/overleaf
+    environment:
+      OVERLEAF_APP_NAME: "Overleaf - luk3rr"
+      OVERLEAF_SITE_URL: "https://overleaf.luk3rr.com"
+      OVERLEAF_NAV_TITLE: "Overleaf"
+      OVERLEAF_ADMIN_EMAIL: "luk3rr@gmail.com"
+      
+      OVERLEAF_MONGO_URL: "mongodb://mongo/sharelatex"
+      OVERLEAF_REDIS_HOST: "redis"
+      
+      ENABLED_LINKED_FILE_TYPES: "project_file,project_output_file"
+      ENABLE_CONVERSIONS: "true"
+      
+      EMAIL_CONFIRMATION_DISABLED: "true"
+      
+    networks:
+      - overleaf-network
+
+  mongo:
+    image: mongo:6.0
+    container_name: overleaf-mongo
+    restart: unless-stopped
+    volumes:
+      - /opt/overleaf/mongo:/data/db
+    healthcheck:
+      test: echo 'db.stats().ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - overleaf-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: overleaf-redis
+    restart: unless-stopped
+    volumes:
+      - overleaf-redis:/data
+    networks:
+      - overleaf-network
+
+volumes:
+  overleaf-redis:
+
+networks:
+  overleaf-network:
+    driver: bridge

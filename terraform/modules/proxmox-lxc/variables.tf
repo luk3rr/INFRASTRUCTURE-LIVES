@@ -80,3 +80,13 @@ variable "start_on_boot" {
   type    = bool
   default = true
 }
+
+variable "unprivileged" {
+  type    = bool
+  default = false
+}
+
+variable "nesting" {
+  type    = bool
+  default = false
+}

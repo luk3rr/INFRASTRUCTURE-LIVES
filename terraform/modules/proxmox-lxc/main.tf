@@ -10,6 +10,7 @@ resource "proxmox_lxc" "lxc" {
   ssh_public_keys = var.ssh_public_key
   start           = var.start_on_create
   onboot          = var.start_on_boot
+  unprivileged    = var.unprivileged
   nameserver      = var.nameserver
 
   rootfs {

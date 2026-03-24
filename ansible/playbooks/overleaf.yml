@@ -1,0 +1,44 @@
+- name: Configure Overleaf LXC Container on Proxmox
+  hosts: proxmox_hosts
+  become: yes
+  gather_facts: no
+  tasks:
+    - name: Stop Overleaf container
+      ansible.builtin.command:
+        cmd: pct stop 113
+      register: pct_stop
+      failed_when: false
+      changed_when: pct_stop.rc == 0
+
+    - name: Configure container features for Docker
+      ansible.builtin.lineinfile:
+        path: /etc/pve/lxc/113.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+        state: present
+      loop:
+        - { regexp: '^features:', line: 'features: nesting=1,keyctl=1' }
+        - { regexp: '^lxc.apparmor.profile:', line: 'lxc.apparmor.profile: unconfined' }
+        - { regexp: '^lxc.cgroup2.devices.allow:', line: 'lxc.cgroup2.devices.allow: a' }
+        - { regexp: '^lxc.cap.drop:', line: 'lxc.cap.drop:' }
+      register: lxc_config
+
+    - name: Start Overleaf container
+      ansible.builtin.command:
+        cmd: pct start 113
+      when: lxc_config.changed or pct_stop.changed
+
+    - name: Wait for container to be ready
+      ansible.builtin.wait_for:
+        host: 192.168.1.113
+        port: 22
+        delay: 5
+        timeout: 60
+      when: lxc_config.changed or pct_stop.changed
+
+- name: Configure Overleaf Server
+  hosts: overleaf
+  become: yes
+  roles:
+    - disable-ipv6
+    - overleaf
