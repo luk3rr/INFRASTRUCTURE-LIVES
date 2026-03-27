@@ -1,6 +1,7 @@
 - name: List Restic Snapshots for a specific host
   hosts: "{{ target_host }}"
-  become: yes
+  become: "{{ false if inventory_hostname in groups['k8s_apps'] else true }}"
+  connection: "{{ 'local' if inventory_hostname in groups['k8s_apps'] else 'ssh' }}"
 
   vars_files:
     - ../group_vars/secrets.yml
@@ -12,6 +13,7 @@
       environment:
         RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
         RESTIC_PASSWORD: "{{ restic_password }}"
+        RESTIC_SFTP_COMMAND: "ssh -q -T -n -o BatchMode=yes"
       register: snapshot_list
       changed_when: false
 

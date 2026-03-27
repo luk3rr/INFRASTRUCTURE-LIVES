@@ -27,11 +27,41 @@ cache:
 
 stages:
   - quality
+  - build
   - setup
   - applications
 
+build_overleaf_image:
+  stage: build
+  needs: []
+  image: docker:24.0.5
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: ""
+    REGISTRY_URL: "registry.gitlab.luk3rr.com"
+    IMAGE_TAG: "latest"
+  before_script:
+    - echo "Building Overleaf custom image with full TeX Live..."
+  script:
+    - cd k8s/overleaf
+    - unset DOCKER_HOST
+    - PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
+    - IMAGE_NAME="${REGISTRY_URL}/${SERVICE_GROUP}/${PROJECT_NAME_LOWER}-overleaf:${IMAGE_TAG}"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
+    - docker build -t "$IMAGE_NAME" .
+    - docker push "$IMAGE_NAME"
+    - echo "Image pushed successfully - $IMAGE_NAME"
+  rules:
+    - changes:
+        - k8s/overleaf/Dockerfile
+      when: on_success
+    - when: manual
+  timeout: 2h
+
 config_service_accounts:
   stage: setup
+  needs: []
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
@@ -47,6 +77,7 @@ config_service_accounts:
 
 config_metallb:
   stage: setup
+  needs: []
   image:
     name: lachlanevenson/k8s-kubectl:latest
     entrypoint: [""]
@@ -180,5 +211,39 @@ deploy_chartdb:
     - kubectl apply -f $CHARTDB_DEPLOY_MANIFEST -n $CHARTDB_NAMESPACE
     - echo "Waiting for ChartDB deployment to be ready..."
     - kubectl rollout status deployment/$SERVICE_NAME -n "$CHARTDB_NAMESPACE" --timeout=120s
+  rules:
+    - when: manual
+
+deploy_overleaf:
+  stage: applications
+  needs:
+    - job: config_metallb
+  image:
+    name: lachlanevenson/k8s-kubectl:latest
+    entrypoint: [""]
+  variables:
+    OVERLEAF_NAMESPACE: "overleaf"
+    OVERLEAF_DEPLOY_MANIFEST: "k8s/overleaf/overleaf.yml"
+    OVERLEAF_LB_SERVICE: "k8s/loadbalancer/service/overleaf.yml"
+  before_script:
+    - echo "$KUBECONFIG_DATA" | base64 -d > kubeconfig
+    - export KUBECONFIG=$PWD/kubeconfig
+  script:
+    - |
+      if ! kubectl get namespace $OVERLEAF_NAMESPACE > /dev/null 2>&1; then
+          echo "Namespace $OVERLEAF_NAMESPACE does not exist. Creating it."
+          kubectl create namespace $OVERLEAF_NAMESPACE
+      fi
+    - echo "Applying Overleaf manifests..."
+    - kubectl apply -f $OVERLEAF_DEPLOY_MANIFEST
+    - echo "Applying LoadBalancer service..."
+    - kubectl apply -f $OVERLEAF_LB_SERVICE
+    - echo "Waiting for MongoDB to be ready..."
+    - kubectl wait --namespace $OVERLEAF_NAMESPACE --for=condition=ready pod --selector=app=mongo --timeout=180s
+    - echo "Waiting for Redis to be ready..."
+    - kubectl wait --namespace $OVERLEAF_NAMESPACE --for=condition=ready pod --selector=app=redis --timeout=120s
+    - echo "Waiting for Overleaf deployment to be ready..."
+    - kubectl rollout status deployment/overleaf -n $OVERLEAF_NAMESPACE --timeout=300s
+    - echo "Overleaf deployed successfully!"
   rules:
     - when: manual

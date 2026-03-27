@@ -1,23 +1,119 @@
-- name: Restore a specific Restic Snapshot to a remote host
+- name: Restore a specific Restic Snapshot
   hosts: "{{ target_host }}"
-  become: yes
+  become: "{{ false if inventory_hostname in groups['k8s_apps'] else true }}"
+  connection: "{{ 'local' if inventory_hostname in groups['k8s_apps'] else 'ssh' }}"
 
   vars_files:
     - ../group_vars/secrets.yml
 
   tasks:
-    - name: "Restoring snapshot '{{ snapshot_id }}' to {{ restore_path }}"
+    - name: "Restoring snapshot '{{ snapshot_id }}' to {{ restore_path }} (LXC/VM)"
       ansible.builtin.command:
         cmd: "restic restore {{ snapshot_id }} --target {{ restore_path }}"
-
       environment:
         RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
         RESTIC_PASSWORD: "{{ restic_password }}"
       register: restore_result
+      when: inventory_hostname not in groups['k8s_apps']
 
-    - name: Display restore result summary
+    - name: Display restore result summary (LXC/VM)
       ansible.builtin.debug:
         msg:
           - "Restore process completed."
           - "Files are located in '{{ restore_path }}' on host '{{ target_host }}'."
           - "Summary: {{ restore_result.stdout_lines | last }}"
+      when: inventory_hostname not in groups['k8s_apps']
+
+    - name: Restore K8s application from snapshot
+      when: inventory_hostname in groups['k8s_apps']
+      block:
+        - name: Create temporary restore directory
+          ansible.builtin.file:
+            path: "/tmp/{{ inventory_hostname }}-restore"
+            state: directory
+            mode: '0700'
+
+        - name: Restore backup from Restic
+          ansible.builtin.command:
+            cmd: "restic restore {{ snapshot_id }} --target /tmp/{{ inventory_hostname }}-restore"
+          environment:
+            RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
+            RESTIC_PASSWORD: "{{ restic_password }}"
+            RESTIC_SFTP_COMMAND: "ssh -q -T -n -o BatchMode=yes"
+
+        - name: Find backup directory
+          ansible.builtin.find:
+            paths: "/tmp/{{ inventory_hostname }}-restore"
+            file_type: directory
+            recurse: no
+          register: backup_dirs
+
+        - name: Set backup path
+          ansible.builtin.set_fact:
+            backup_path: "{{ backup_dirs.files[0].path }}"
+
+        - name: Get application pod
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Pod
+            namespace: "{{ k8s_namespace }}"
+            label_selectors:
+              - app={{ k8s_app_label }}
+          register: app_pod
+
+        - name: Get MongoDB pod
+          kubernetes.core.k8s_info:
+            api_version: v1
+            kind: Pod
+            namespace: "{{ k8s_namespace }}"
+            label_selectors:
+              - app={{ k8s_mongo_label }}
+          register: mongo_pod
+          when: k8s_mongo_label is defined
+
+        - name: Copy MongoDB backup to pod
+          ansible.builtin.command:
+            cmd: "kubectl cp {{ backup_path }}/mongo-backup.tar.gz {{ k8s_namespace }}/{{ mongo_pod.resources[0].metadata.name }}:/tmp/mongo-backup.tar.gz"
+          when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+        - name: Extract MongoDB backup in pod
+          kubernetes.core.k8s_exec:
+            namespace: "{{ k8s_namespace }}"
+            pod: "{{ mongo_pod.resources[0].metadata.name }}"
+            command: "tar xzf /tmp/mongo-backup.tar.gz -C /tmp"
+          when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+        - name: Restore MongoDB database
+          kubernetes.core.k8s_exec:
+            namespace: "{{ k8s_namespace }}"
+            pod: "{{ mongo_pod.resources[0].metadata.name }}"
+            command: "sh -c 'mongorestore --uri=mongodb://localhost:27017 --gzip --drop /tmp/mongo-backup-*'"
+          when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+        - name: Copy application data to pod
+          ansible.builtin.command:
+            cmd: "kubectl cp {{ backup_path }}/app-data.tar.gz {{ k8s_namespace }}/{{ app_pod.resources[0].metadata.name }}:/tmp/app-data.tar.gz"
+          when: app_pod.resources | length > 0
+
+        - name: Extract application data
+          kubernetes.core.k8s_exec:
+            namespace: "{{ k8s_namespace }}"
+            pod: "{{ app_pod.resources[0].metadata.name }}"
+            command: "tar xzf /tmp/app-data.tar.gz -C /var/lib/overleaf"
+          when: app_pod.resources | length > 0
+
+        - name: Clean up temporary files
+          ansible.builtin.file:
+            path: "/tmp/{{ inventory_hostname }}-restore"
+            state: absent
+
+        - name: Restart deployment
+          ansible.builtin.command:
+            cmd: "kubectl rollout restart deployment/{{ k8s_app_label }} -n {{ k8s_namespace }}"
+
+        - name: Display K8s restore summary
+          ansible.builtin.debug:
+            msg:
+              - "Restore process completed for K8s application."
+              - "Namespace: {{ k8s_namespace }}"
+              - "Deployment restarted. Wait for pods to be ready."

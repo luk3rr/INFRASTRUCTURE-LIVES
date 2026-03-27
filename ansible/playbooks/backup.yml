@@ -1,4 +1,4 @@
-- name: Execute backups on all targets
+- name: Execute backups on LXC containers and VMs
   hosts: lxc_containers, vms
   become: yes
   vars:
@@ -15,3 +15,142 @@
         RESTIC_SFTP_COMMAND: "ssh -q -T -n -o BatchMode=yes"
       register: backup_result
       changed_when: "'files new' in backup_result.stdout"
+
+- name: Execute backups on Kubernetes applications
+  hosts: k8s_apps
+  connection: local
+  gather_facts: yes
+  vars_files:
+    - ../group_vars/secrets.yml
+  vars:
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    local_backup_dir: "/tmp/{{ inventory_hostname }}-backup-{{ backup_timestamp }}"
+
+  tasks:
+    - name: Create local backup directory
+      ansible.builtin.file:
+        path: "{{ local_backup_dir }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+
+    - name: Get application pod name
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ k8s_namespace }}"
+        label_selectors:
+          - app={{ k8s_app_label }}
+      register: app_pod
+      delegate_to: localhost
+
+    - name: Get MongoDB pod name
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: Pod
+        namespace: "{{ k8s_namespace }}"
+        label_selectors:
+          - app={{ k8s_mongo_label }}
+      register: mongo_pod
+      delegate_to: localhost
+      when: k8s_mongo_label is defined
+
+    - name: Backup MongoDB database
+      kubernetes.core.k8s_exec:
+        namespace: "{{ k8s_namespace }}"
+        pod: "{{ mongo_pod.resources[0].metadata.name }}"
+        command: >
+          mongodump 
+          --uri="mongodb://localhost:27017/sharelatex?replicaSet=rs0" 
+          --out=/tmp/mongo-backup-{{ backup_timestamp }} 
+          --gzip
+      delegate_to: localhost
+      when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+    - name: Create tar archive of MongoDB backup inside pod
+      kubernetes.core.k8s_exec:
+        namespace: "{{ k8s_namespace }}"
+        pod: "{{ mongo_pod.resources[0].metadata.name }}"
+        command: >
+          tar czf /tmp/mongo-backup-{{ backup_timestamp }}.tar.gz 
+          -C /tmp mongo-backup-{{ backup_timestamp }}
+      delegate_to: localhost
+      when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+    - name: Copy MongoDB backup from pod to local
+      ansible.builtin.command:
+        cmd: >
+          kubectl cp 
+          {{ k8s_namespace }}/{{ mongo_pod.resources[0].metadata.name }}:/tmp/mongo-backup-{{ backup_timestamp }}.tar.gz 
+          {{ local_backup_dir }}/mongo-backup.tar.gz
+      delegate_to: localhost
+      when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+    - name: Backup application data directory
+      kubernetes.core.k8s_exec:
+        namespace: "{{ k8s_namespace }}"
+        pod: "{{ app_pod.resources[0].metadata.name }}"
+        command: >
+          tar czf /tmp/app-data-{{ backup_timestamp }}.tar.gz 
+          -C /var/lib/overleaf .
+      delegate_to: localhost
+      when: app_pod.resources | length > 0
+
+    - name: Copy application data from pod to local
+      ansible.builtin.command:
+        cmd: >
+          kubectl cp 
+          {{ k8s_namespace }}/{{ app_pod.resources[0].metadata.name }}:/tmp/app-data-{{ backup_timestamp }}.tar.gz 
+          {{ local_backup_dir }}/app-data.tar.gz
+      delegate_to: localhost
+      when: app_pod.resources | length > 0
+
+    - name: Create backup metadata file
+      ansible.builtin.copy:
+        content: |
+          Backup Date: {{ ansible_date_time.iso8601 }}
+          Application: {{ inventory_hostname }}
+          Namespace: {{ k8s_namespace }}
+          App Pod: {{ app_pod.resources[0].metadata.name if app_pod.resources | length > 0 else 'N/A' }}
+          MongoDB Pod: {{ mongo_pod.resources[0].metadata.name if k8s_mongo_label is defined and mongo_pod.resources | length > 0 else 'N/A' }}
+        dest: "{{ local_backup_dir }}/backup-info.txt"
+      delegate_to: localhost
+
+    - name: Upload backup to Restic repository
+      ansible.builtin.shell:
+        cmd: >
+          restic backup {{ local_backup_dir }} 
+          --tag {{ inventory_hostname }}
+      environment:
+        RESTIC_REPOSITORY: "sftp:restic-backup@{{ ansible_controller_ip }}:/home/restic-backup/repo/{{ inventory_hostname }}"
+        RESTIC_PASSWORD: "{{ restic_password }}"
+        RESTIC_SFTP_COMMAND: "ssh -q -T -n -o BatchMode=yes"
+      register: backup_result
+      delegate_to: localhost
+
+    - name: Clean up MongoDB backup from pod
+      kubernetes.core.k8s_exec:
+        namespace: "{{ k8s_namespace }}"
+        pod: "{{ mongo_pod.resources[0].metadata.name }}"
+        command: >
+          rm -rf /tmp/mongo-backup-{{ backup_timestamp }} 
+          /tmp/mongo-backup-{{ backup_timestamp }}.tar.gz
+      delegate_to: localhost
+      failed_when: false
+      when: k8s_mongo_label is defined and mongo_pod.resources | length > 0
+
+    - name: Clean up application backup from pod
+      kubernetes.core.k8s_exec:
+        namespace: "{{ k8s_namespace }}"
+        pod: "{{ app_pod.resources[0].metadata.name }}"
+        command: >
+          rm -f /tmp/app-data-{{ backup_timestamp }}.tar.gz
+      delegate_to: localhost
+      failed_when: false
+      when: app_pod.resources | length > 0
+
+    - name: Clean up local backup directory
+      ansible.builtin.file:
+        path: "{{ local_backup_dir }}"
+        state: absent
+      delegate_to: localhost

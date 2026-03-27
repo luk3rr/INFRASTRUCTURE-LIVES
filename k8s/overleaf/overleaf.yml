@@ -1,0 +1,294 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: overleaf
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: overleaf-data
+  namespace: overleaf
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: redis-data
+  namespace: overleaf
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: overleaf-config
+  namespace: overleaf
+data:
+  OVERLEAF_APP_NAME: "Overleaf - luk3rr"
+  OVERLEAF_SITE_URL: "https://overleaf.luk3rr.com"
+  OVERLEAF_NAV_TITLE: "Overleaf"
+  OVERLEAF_ADMIN_EMAIL: "luk3rr@gmail.com"
+  OVERLEAF_EMAIL_FROM_ADDRESS: "luk3rr@gmail.com"
+  ENABLED_LINKED_FILE_TYPES: "project_file,project_output_file"
+  ENABLE_CONVERSIONS: "true"
+  EMAIL_CONFIRMATION_DISABLED: "true"
+  TEXMFVAR: "/var/lib/overleaf/tmp/texmf-var"
+  COMPILE_TIMEOUT: "300"
+  TZ: "America/Sao_Paulo"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: overleaf
+spec:
+  selector:
+    app: mongo
+  ports:
+    - protocol: TCP
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongo
+  namespace: overleaf
+spec:
+  serviceName: mongo
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mongo
+  template:
+    metadata:
+      labels:
+        app: mongo
+    spec:
+      initContainers:
+        - name: init-replica-set
+          image: mongo:6.0
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Starting MongoDB temporarily to initialize replica set..."
+              mongod --replSet rs0 --bind_ip_all --fork --logpath /tmp/mongo-init.log
+              
+              echo "Waiting for MongoDB to start..."
+              until mongosh --quiet --eval "db.adminCommand('ping').ok" 2>/dev/null | grep -q "1"; do
+                sleep 2
+              done
+              
+              echo "Initializing replica set..."
+              mongosh --eval "
+                try {
+                  var status = rs.status();
+                  print('Replica set already initialized');
+                } catch (err) {
+                  print('Initializing replica set...');
+                  rs.initiate({
+                    _id: 'rs0',
+                    members: [{ _id: 0, host: 'localhost:27017' }]
+                  });
+                  print('Waiting for replica set to be ready...');
+                  while (rs.status().ok != 1) {
+                    sleep(1000);
+                  }
+                  print('Replica set initialized successfully');
+                }
+              "
+              
+              echo "Shutting down temporary MongoDB..."
+              mongosh --eval "db.getSiblingDB('admin').shutdownServer({force: true})" || true
+              sleep 2
+              echo "Initialization complete"
+          volumeMounts:
+            - name: mongo-storage
+              mountPath: /data/db
+      containers:
+        - name: mongo
+          image: mongo:6.0
+          command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+          ports:
+            - containerPort: 27017
+          volumeMounts:
+            - name: mongo-storage
+              mountPath: /data/db
+          env:
+            - name: MONGO_INITDB_DATABASE
+              value: sharelatex
+          livenessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - db.adminCommand('ping')
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - mongosh
+                - --eval
+                - db.adminCommand('ping')
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 6
+  volumeClaimTemplates:
+    - metadata:
+        name: mongo-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: overleaf
+  labels:
+    app: redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:6.2
+          ports:
+            - containerPort: 6379
+          volumeMounts:
+            - name: redis-storage
+              mountPath: /data
+          livenessProbe:
+            tcpSocket:
+              port: 6379
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command:
+                - redis-cli
+                - ping
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: redis-storage
+          persistentVolumeClaim:
+            claimName: redis-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: overleaf
+spec:
+  selector:
+    app: redis
+  ports:
+    - protocol: TCP
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overleaf
+  namespace: overleaf
+  labels:
+    app: overleaf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: overleaf
+  template:
+    metadata:
+      labels:
+        app: overleaf
+    spec:
+      imagePullSecrets:
+        - name: gitlab-registry-secret
+      containers:
+        - name: overleaf
+          image: registry.gitlab.luk3rr.com/personal/projects/infrastructure_lives-overleaf:latest
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: overleaf-storage
+              mountPath: /var/lib/overleaf
+          env:
+            - name: MONGO_HOST
+              value: "$(MONGO_SERVICE_HOST)"
+            - name: MONGO_PORT
+              value: "$(MONGO_SERVICE_PORT)"
+            - name: OVERLEAF_MONGO_URL
+              value: "mongodb://$(MONGO_SERVICE_HOST):$(MONGO_SERVICE_PORT)/sharelatex?replicaSet=rs0&directConnection=true"
+            - name: OVERLEAF_REDIS_HOST
+              value: "$(REDIS_SERVICE_HOST)"
+            - name: REDIS_HOST
+              value: "$(REDIS_SERVICE_HOST)"
+          envFrom:
+            - configMapRef:
+                name: overleaf-config
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 80
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "4Gi"
+              cpu: "2000m"
+      volumes:
+        - name: overleaf-storage
+          persistentVolumeClaim:
+            claimName: overleaf-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: overleaf
+  namespace: overleaf
+spec:
+  selector:
+    app: overleaf
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80

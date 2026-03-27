@@ -39,7 +39,7 @@ prepare_ssh_server() {
 }
 
 get_backup_hosts() {
-  awk '/^\[(lxc_containers|vms)\]/{f=1;next} /^\[/{f=0} f && !/^\s*($|#)/{print $1}' inventory.ini
+  awk '/^\[(lxc_containers|vms|k8s_apps)\]/{f=1;next} /^\[/{f=0} f && !/^\s*($|#)/{print $1}' inventory.ini
 }
 
 # =================================================================================

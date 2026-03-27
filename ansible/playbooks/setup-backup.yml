@@ -40,7 +40,7 @@
       loop: "{{ query('inventory_hostnames', 'lxc_containers,vms') }}"
 
     - name: Initialize Restic repository for each client (if it doesn't exist)
-      loop: "{{ query('inventory_hostnames', 'lxc_containers,vms') }}"
+      loop: "{{ query('inventory_hostnames', 'lxc_containers,vms,k8s_apps') }}"
       become_user: restic-backup
       ansible.builtin.command:
         cmd: "restic init"

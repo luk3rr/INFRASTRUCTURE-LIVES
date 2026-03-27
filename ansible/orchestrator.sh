@@ -28,7 +28,7 @@ SERVICES_INSTALL_UPDATE_PLAYBOOKS=(
   "My Speed:myspeed::"
   "Beszel:beszel::"
   "Beszel Agent:beszel-agent:--ask-vault-pass,--limit:beszel_agent_token,beszel_public_key,beszel_hub_url"
-  "Overleaf:overleaf::"
+  "Overleaf (LXC):overleaf::"
   "Development VM:dev-vm::"
 )
 
