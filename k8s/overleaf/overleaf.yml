@@ -232,7 +232,7 @@ spec:
         - name: gitlab-registry-secret
       containers:
         - name: overleaf
-          image: registry.gitlab.luk3rr.com/personal/projects/infrastructure_lives-overleaf:latest
+          image: registry.gitlab.luk3rr.com/personal/infrastructure_lives/overleaf:latest
           ports:
             - containerPort: 80
           volumeMounts:

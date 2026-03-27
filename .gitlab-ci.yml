@@ -39,15 +39,13 @@ build_overleaf_image:
     - docker:24-dind
   variables:
     DOCKER_TLS_CERTDIR: ""
-    REGISTRY_URL: "registry.gitlab.luk3rr.com"
     IMAGE_TAG: "latest"
   before_script:
     - echo "Building Overleaf custom image with full TeX Live..."
   script:
     - cd k8s/overleaf
     - unset DOCKER_HOST
-    - PROJECT_NAME_LOWER=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]')
-    - IMAGE_NAME="${REGISTRY_URL}/${SERVICE_GROUP}/${PROJECT_NAME_LOWER}-overleaf:${IMAGE_TAG}"
+    - IMAGE_NAME="${CI_REGISTRY_IMAGE}/overleaf:${IMAGE_TAG}"
     - echo "$CI_REGISTRY_PASSWORD" | docker login "$CI_REGISTRY" -u "$CI_REGISTRY_USER" --password-stdin
     - docker build -t "$IMAGE_NAME" .
     - docker push "$IMAGE_NAME"
