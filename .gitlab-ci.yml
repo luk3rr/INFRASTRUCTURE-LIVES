@@ -40,6 +40,7 @@ build_overleaf_image:
   variables:
     DOCKER_TLS_CERTDIR: ""
     IMAGE_TAG: "latest"
+    DOCKER_BUILDKIT: "1"
   before_script:
     - echo "Building Overleaf custom image with full TeX Live..."
   script:

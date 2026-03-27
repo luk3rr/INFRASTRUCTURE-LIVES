@@ -999,13 +999,27 @@ registry['env_directory'] = "/opt/gitlab/etc/registry/env"
 # registry['health_storagedriver_enabled'] = true
 # registry['middleware'] = nil
 registry['storage_delete_enabled'] = true
-# registry['validation_enabled'] = false
+registry['validation_enabled'] = true
 # registry['autoredirect'] = false
 # registry['compatibility_schema1_enabled'] = false
 # registry['database'] = nil
 
 ### Registry backend storage
 ###! Docs: https://docs.gitlab.com/ee/administration/packages/container_registry.html#configure-storage-for-the-container-registry
+registry['storage'] = {
+  'filesystem' => {
+    'rootdirectory' => '/var/opt/gitlab/gitlab-rails/shared/registry',
+    'maxthreads' => 100
+  },
+  'maintenance' => {
+    'uploadpurging' => {
+      'enabled' => true,
+      'age' => '168h',
+      'interval' => '24h',
+      'dryrun' => false
+    }
+  }
+}
 # registry['storage'] = {
 #   's3' => {
 #     'accesskey' => 's3-access-key',
@@ -1142,7 +1156,7 @@ registry['storage_delete_enabled'] = true
 # gitlab_workhorse['api_queue_limit'] = 0
 
 ##! duration after which we timeout requests if they sit too long in the queue
-# gitlab_workhorse['api_queue_duration'] = "30s"
+gitlab_workhorse['api_queue_duration'] = "10m"
 
 ##! Long polling duration for job requesting for runners
 # gitlab_workhorse['api_ci_long_polling_duration'] = "60s"
@@ -1700,7 +1714,7 @@ puma['enable'] = true
 ################################################################################
 
 # nginx['enable'] = true
-# nginx['client_max_body_size'] = '250m'
+nginx['client_max_body_size'] = '0'
 # nginx['redirect_http_to_https'] = false
 # nginx['redirect_http_to_https_port'] = 80
 
@@ -2315,6 +2329,13 @@ nginx['real_ip_recursive'] = 'on'
 
 # Below you can find settings that are exclusive to "Registry NGINX"
 registry_nginx['enable'] = true
+registry_nginx['client_max_body_size'] = '0'
+registry_nginx['proxy_read_timeout'] = 900
+registry_nginx['proxy_connect_timeout'] = 900
+registry_nginx['proxy_send_timeout'] = 900
+registry_nginx['proxy_http_version'] = '1.1'
+registry_nginx['proxy_buffering'] = 'off'
+registry_nginx['proxy_request_buffering'] = 'off'
 
 registry_nginx['proxy_set_headers'] = {
  "Host" => "$http_host",

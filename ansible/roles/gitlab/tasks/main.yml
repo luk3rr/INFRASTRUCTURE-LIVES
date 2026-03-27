@@ -3,13 +3,28 @@
     gitlab_domain: "gitlab.luk3rr.com"
     registry_domain: "registry.gitlab.luk3rr.com"
 
+- name: GitLab | Check if GitLab is already installed
+  ansible.builtin.stat:
+    path: /etc/gitlab/gitlab.rb
+  register: gitlab_installed
+
 - name: GitLab | Download dependencies and install the Omnibus installer script
   block:
+  - name: GitLab | Update apt cache
+    ansible.builtin.apt:
+      update_cache: yes
+      cache_valid_time: 3600
+    retries: 3
+    delay: 10
+    register: apt_update_result
+    until: apt_update_result is succeeded
+    when: not gitlab_installed.stat.exists
+
   - name: GitLab | Install dependencies
     ansible.builtin.apt:
       name: ['curl', 'ca-certificates', 'postfix', 'openssh-server', 'tzdata', 'perl', 'python3-cryptography']
       state: present
-      update_cache: yes
+      update_cache: no
 
   - name: GitLab | Download and run the Omnibus installer script
     ansible.builtin.shell:

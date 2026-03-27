@@ -11,3 +11,10 @@
 - name: Apply sysctl settings
   ansible.builtin.command: sysctl -p /etc/sysctl.d/99-disable-ipv6.conf
   changed_when: false
+  failed_when: false
+  register: sysctl_result
+
+- name: Check if IPv6 is already disabled at kernel level
+  ansible.builtin.debug:
+    msg: "IPv6 appears to be disabled at kernel level (sysctl files not found). This is expected if IPv6 was disabled via GRUB."
+  when: sysctl_result.rc != 0
