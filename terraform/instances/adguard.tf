@@ -11,4 +11,5 @@ module "adguard" {
   password       = var.default_lxc_password
   ssh_public_key = var.ssh_public_key
   nameserver     = "192.168.1.102"
+  disk_size = 16
 }
